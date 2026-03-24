@@ -85,7 +85,6 @@ def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
         output_names=["logits"],
         dynamic_axes={"x": {0: "batch", 1: "seq_len"}, "logits": {0: "batch", 1: "seq_len"}},
         do_constant_folding=True,
-        enable_onnx_checker=True,
         verbose=False,
     )
     print("Export completed.")
