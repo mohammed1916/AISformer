@@ -53,7 +53,98 @@ if TB_LOG:
 utils.set_seed(42)
 torch.pi = torch.acos(torch.zeros(1)).item() * 2
 
+from pathlib import Path
+import glob
+
+# Optional fancy interactive menu with arrows + enter
+try:
+    from InquirerPy import inquirer
+    from InquirerPy.base.control import Choice
+    INQUIRER_AVAILABLE = True
+except ImportError:
+    INQUIRER_AVAILABLE = False
+
+
+def prompt_yes_no(question, default=False):
+    default_str = "[Y/n]" if default else "[y/N]"
+    while True:
+        resp = input(f"{question} {default_str}: ").strip().lower()
+        if resp == "" and default is not None:
+            return default
+        if resp in ("y", "yes"):
+            return True
+        if resp in ("n", "no"):
+            return False
+        print("Please answer y or n.")
+
+
+def find_checkpoints(root_dir="."):
+    print(f"Scanning for checkpoint files under '{root_dir}'...")
+    p = Path(root_dir)
+    ckpts = sorted(p.rglob("*.pt"), key=lambda x: x.stat().st_mtime, reverse=True)
+    print(f"Found {len(ckpts)} checkpoint(s).")
+    return ckpts
+
+
+def select_checkpoint():
+    print("Looking for checkpoints...")
+    ckpts = find_checkpoints(".")
+    if not ckpts:
+        print("No .pt checkpoints found in current directory tree.")
+        while True:
+            manual = input("Enter path to checkpoint (.pt): ").strip()
+            if manual == "":
+                continue
+            p = Path(manual).expanduser()
+            if p.is_file():
+                return str(p)
+            print(f"Checkpoint file not found: {p}")
+
+    # prefer rich arrow/select UI if available
+    if INQUIRER_AVAILABLE:
+        choices = [Choice(value=str(p), name=f"{p} (modified: {p.stat().st_mtime:.0f})") for p in ckpts]
+        choices.append(Choice(value="__custom__", name="Custom path"))
+        selected = inquirer.select(message="Select checkpoint:", choices=choices, pointer="➜").execute()
+        if selected != "__custom__":
+            return selected
+        # custom path if user selected custom
+        while True:
+            manual = input("Enter path to checkpoint (.pt): ").strip()
+            p = Path(manual).expanduser()
+            if p.is_file():
+                return str(p)
+            print(f"Checkpoint file not found: {p}")
+
+    print("Found checkpoint candidates:")
+    for i, p in enumerate(ckpts):
+        print(f" [{i}] {p} (modified: {p.stat().st_mtime:.0f})")
+    print(" [c] custom path")
+
+    while True:
+        sel = input("Select checkpoint index (or c for custom): ").strip().lower()
+        if sel == "c":
+            manual = input("Enter path to checkpoint (.pt): ").strip()
+            p = Path(manual).expanduser()
+            if p.is_file():
+                return str(p)
+            print(f"Checkpoint file not found: {p}")
+            continue
+        if sel.isdigit():
+            idx = int(sel)
+            if 0 <= idx < len(ckpts):
+                return str(ckpts[idx])
+        print("Invalid selection, try again.")
+
+
 if __name__ == "__main__":
+
+    print("\n== TrAISformer interactive checkpoint selector ==")
+    selected_ckpt = select_checkpoint()
+    print(f"Using checkpoint: {selected_ckpt}")
+    cf.ckpt_path = selected_ckpt
+
+    retrain_decision = prompt_yes_no("Retrain model before evaluation?", default=False)
+    cf.retrain = retrain_decision
 
     device = cf.device
     init_seqlen = cf.init_seqlen
