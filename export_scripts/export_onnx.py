@@ -59,7 +59,11 @@ def select_checkpoint(root_dir="."):
 
 def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
     cf = Config()
-    cf.max_seqlen = seq_len
+    # keep the model's training max_seqlen, so loaded parameters (pos_emb, masks) match
+    trained_max_seqlen = cf.max_seqlen
+    if seq_len > trained_max_seqlen:
+        raise ValueError(f"seq_len ({seq_len}) cannot exceed trained max_seqlen ({trained_max_seqlen})")
+
     # use same model config that the checkpoint was trained with
     model = TrAISformer(cf, partition_model=None).to(device)
     state = torch.load(ckpt_path, map_location=device)
@@ -69,18 +73,20 @@ def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
         model.load_state_dict(state)
     model.eval()
 
-    dummy_input = torch.zeros((1, cf.init_seqlen, 4), dtype=torch.float32, device=device)
+    dummy_input = torch.zeros((1, seq_len, 4), dtype=torch.float32, device=device)
 
-    print(f"Exporting ONNX model to {onnx_path} (seq_len={cf.init_seqlen})...")
+    print(f"Exporting ONNX model to {onnx_path} (seq_len={seq_len})...")
     torch.onnx.export(
         model,
         dummy_input,
         onnx_path,
-        opset_version=14,
+        opset_version=18,
         input_names=["x"],
         output_names=["logits"],
         dynamic_axes={"x": {0: "batch", 1: "seq_len"}, "logits": {0: "batch", 1: "seq_len"}},
         do_constant_folding=True,
+        enable_onnx_checker=True,
+        verbose=False,
     )
     print("Export completed.")
 
