@@ -1,3 +1,11 @@
+import os
+import sys
+
+# ensure root package imports work when script is run from this folder
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
