@@ -59,7 +59,11 @@ class TrAISformerInterpolation(nn.Module):
             activation="gelu",
             batch_first=True,
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=config.n_layer)
+        self.encoder = nn.TransformerEncoder(
+            encoder_layer,
+            num_layers=config.n_layer,
+            enable_nested_tensor=False,
+        )
         self.ln_f = nn.LayerNorm(config.n_embd)
         self.head = nn.Linear(config.n_embd, self.full_size, bias=False)
 
