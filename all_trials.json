@@ -1,0 +1,122 @@
+[
+  {
+    "params": {
+      "learning_rate": 0.001,
+      "batch_size": 64,
+      "warmup_tokens": 5000,
+      "optimizer": "sgd"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.3397832823167142,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.0002,
+      "batch_size": 16,
+      "warmup_tokens": 2000,
+      "optimizer": "adam"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.3366493843575611,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.001,
+      "batch_size": 64,
+      "warmup_tokens": 2000,
+      "optimizer": "sgd"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.3681895833194943,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "warmup_tokens": 5000,
+      "optimizer": "adam"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.41332601556712983,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.0002,
+      "batch_size": 32,
+      "warmup_tokens": 2000,
+      "optimizer": "adam"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.4573097274446499,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.0006,
+      "batch_size": 64,
+      "warmup_tokens": 10000,
+      "optimizer": "adam"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.5801394380403109,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "warmup_tokens": 10000,
+      "optimizer": "sgd"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.4057554592392868,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.0002,
+      "batch_size": 32,
+      "warmup_tokens": 2000,
+      "optimizer": "adam"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.34661987300768754,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.0002,
+      "batch_size": 64,
+      "warmup_tokens": 5000,
+      "optimizer": "adam"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.4779975770805309,
+    "epochs_saved": 18
+  },
+  {
+    "params": {
+      "learning_rate": 0.001,
+      "batch_size": 32,
+      "warmup_tokens": 5000,
+      "optimizer": "adam"
+    },
+    "epochs_run": 2,
+    "predicted_plateau": 2,
+    "final_metric": 0.3002174698253238,
+    "epochs_saved": 18
+  }
+]

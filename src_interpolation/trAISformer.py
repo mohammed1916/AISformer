@@ -5,6 +5,7 @@
 
 import os
 import pickle
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -165,6 +166,29 @@ def evaluate(model, aisdls):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="TrAISformer Interpolation Training")
+    parser.add_argument("--max-epochs", type=int, default=None)
+    parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--learning-rate", type=float, default=None)
+    parser.add_argument("--warmup-tokens", type=int, default=None)
+    parser.add_argument("--n-samples", type=int, default=None)
+    parser.add_argument("--retrain", type=lambda x: str(x).lower() in ["true", "1", "yes"], default=None)
+    parser.add_argument("--eval-only", action="store_true")
+    args = parser.parse_args()
+
+    if args.max_epochs is not None:
+        cf.max_epochs = args.max_epochs
+    if args.batch_size is not None:
+        cf.batch_size = args.batch_size
+    if args.learning_rate is not None:
+        cf.learning_rate = args.learning_rate
+    if args.warmup_tokens is not None:
+        cf.warmup_tokens = args.warmup_tokens
+    if args.n_samples is not None:
+        cf.n_samples = args.n_samples
+    if args.retrain is not None:
+        cf.retrain = args.retrain
+
     print("\n== TrAISformer interpolation training ==")
     if not os.path.isdir(cf.savedir):
         os.makedirs(cf.savedir)
@@ -192,9 +216,15 @@ if __name__ == "__main__":
         aisdls=aisdls,
     )
 
-    if cf.retrain or not os.path.exists(cf.ckpt_path):
-        trainer.train()
+    if args.eval_only:
+        model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
+        model = model.to(cf.device)
+        evaluate(model, aisdls)
+    else:
+        if cf.retrain or not os.path.exists(cf.ckpt_path):
+            trainer.train()
 
-    model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
-    model = model.to(cf.device)
-    evaluate(model, aisdls)
+        model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
+        model = model.to(cf.device)
+        evaluate(model, aisdls)
+
