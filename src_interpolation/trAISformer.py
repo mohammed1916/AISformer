@@ -16,6 +16,7 @@ from tqdm import tqdm
 
 import datasets
 import models
+import position_utils
 import trainers
 import utils
 from config_trAISformer import Config
@@ -83,6 +84,7 @@ def build_datasets():
             edge_case_prob=cf.edge_case_prob,
             samples_per_track=samples_per_track[phase],
             seed=cf.seed + {"train": 0, "valid": 10000, "test": 20000}[phase],
+            config=cf,
         )
         aisdls[phase] = DataLoader(
             aisdatasets[phase],
@@ -105,12 +107,6 @@ def build_datasets():
 
 
 def evaluate(model, aisdls):
-    v_ranges = torch.tensor(
-        [model.lat_max - model.lat_min, model.lon_max - model.lon_min, model.sog_range, 360.0],
-        device=cf.device,
-    )
-    v_roi_min = torch.tensor([model.lat_min, model.lon_min, 0.0, 0.0], device=cf.device)
-
     gap_error_sum = np.zeros(cf.max_gap_points, dtype=np.float64)
     gap_error_count = np.zeros(cf.max_gap_points, dtype=np.float64)
     global_error_sum = 0.0
@@ -120,11 +116,26 @@ def evaluate(model, aisdls):
     with torch.no_grad():
         pbar = tqdm(enumerate(aisdls["test"]), total=len(aisdls["test"]))
         for _, batch in pbar:
-            seqs, token_types, valid_masks, target_masks, seqlens, past_lens, gap_lens, future_lens, mmsis, time_seqs = batch
+            (
+                seqs,
+                token_types,
+                valid_masks,
+                target_masks,
+                seqlens,
+                past_lens,
+                gap_lens,
+                future_lens,
+                mmsis,
+                time_seqs,
+                origin_lats,
+                origin_lons,
+            ) = batch
             seqs = seqs.to(cf.device)
             token_types = token_types.to(cf.device)
             valid_masks = valid_masks.to(cf.device)
             target_masks = target_masks.to(cf.device)
+            origin_lats = origin_lats.to(cf.device)
+            origin_lons = origin_lons.to(cf.device)
 
             preds = trainers.predict_gap(
                 model,
@@ -136,8 +147,18 @@ def evaluate(model, aisdls):
                 top_k=cf.top_k,
             )
 
-            input_coords = (seqs * v_ranges + v_roi_min) * torch.pi / 180
-            pred_coords = (preds * v_ranges + v_roi_min) * torch.pi / 180
+            input_coords = position_utils.model_norm_to_real_torch(
+                seqs[:, :, :2],
+                cf,
+                origin_lats=origin_lats,
+                origin_lons=origin_lons,
+            ) * torch.pi / 180.0
+            pred_coords = position_utils.model_norm_to_real_torch(
+                preds[:, :, :2],
+                cf,
+                origin_lats=origin_lats,
+                origin_lons=origin_lons,
+            ) * torch.pi / 180.0
             d = utils.haversine(input_coords, pred_coords)
 
             global_error_sum += (d * target_masks).sum().item()
@@ -207,8 +228,14 @@ if __name__ == "__main__":
     utils.new_log(cf.savedir, "log")
 
     logging.info(
-        "Interpolation config: gap [%d,%d], past [%d,%d], future [%d,%d], edge_case_prob=%s, "
+        "Interpolation config: position_mode=%s local-km north[%s,%s] east[%s,%s], "
+        "gap [%d,%d], past [%d,%d], future [%d,%d], edge_case_prob=%s, "
         "bins lat/lon/sog/cog=%d/%d/%d/%d, lr_decay=%s weight_decay=%s",
+        getattr(cf, "position_mode", "global_roi"),
+        getattr(cf, "north_km_min", "n/a"),
+        getattr(cf, "north_km_max", "n/a"),
+        getattr(cf, "east_km_min", "n/a"),
+        getattr(cf, "east_km_max", "n/a"),
         cf.min_gap_points,
         cf.max_gap_points,
         cf.min_past_points,
@@ -227,11 +254,6 @@ if __name__ == "__main__":
     data, aisdatasets, aisdls = build_datasets()
 
     model = models.TrAISformerInterpolation(cf)
-    model.lat_min = cf.lat_min
-    model.lat_max = cf.lat_max
-    model.lon_min = cf.lon_min
-    model.lon_max = cf.lon_max
-    model.sog_range = cf.sog_range
 
     trainer = trainers.Trainer(
         model,
@@ -254,4 +276,3 @@ if __name__ == "__main__":
         model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
         model = model.to(cf.device)
         evaluate(model, aisdls)
-

@@ -85,7 +85,20 @@ class Trainer:
             return
 
         raw_model = self.model.module if hasattr(self.model, "module") else self.model
-        seqs, token_types, valid_masks, target_masks, seqlens, past_lens, gap_lens, future_lens, mmsis, time_seqs = next(iter(self.aisdls["test"]))
+        (
+            seqs,
+            token_types,
+            valid_masks,
+            target_masks,
+            seqlens,
+            past_lens,
+            gap_lens,
+            future_lens,
+            mmsis,
+            time_seqs,
+            origin_lats,
+            origin_lons,
+        ) = next(iter(self.aisdls["test"]))
         n_plots = min(6, seqs.shape[0])
         seqs = seqs[:n_plots].to(self.device)
         token_types = token_types[:n_plots].to(self.device)
@@ -150,7 +163,20 @@ class Trainer:
             running_loss, n_items = 0.0, 0
 
             for it, batch in pbar:
-                seqs, token_types, valid_masks, target_masks, seqlens, past_lens, gap_lens, future_lens, mmsis, time_seqs = batch
+                (
+                    seqs,
+                    token_types,
+                    valid_masks,
+                    target_masks,
+                    seqlens,
+                    past_lens,
+                    gap_lens,
+                    future_lens,
+                    mmsis,
+                    time_seqs,
+                    origin_lats,
+                    origin_lons,
+                ) = batch
                 seqs = seqs.to(self.device)
                 token_types = token_types.to(self.device)
                 valid_masks = valid_masks.to(self.device)

@@ -49,11 +49,28 @@ class Config:
         n_sog_embd = 64
         n_cog_embd = 64
 
-        lat_min = 55.5
-        lat_max = 58.0
-        lon_min = 10.3
-        lon_max = 13.0
+        data_lat_min = 55.5
+        data_lat_max = 58.0
+        data_lon_min = 10.3
+        data_lon_max = 13.0
         sog_range = 30.0
+
+        # Position encoding for interpolation:
+        # use a per-sample local north/east frame anchored at the last observed
+        # past point so the model can be retrained independent of absolute ROI.
+        position_mode = "local_offset_km"
+        north_km_min = -80.0
+        north_km_max = 80.0
+        east_km_min = -80.0
+        east_km_max = 80.0
+        local_origin_mode = "last_past_point"
+
+        # Keep legacy aliases for any remaining code paths that still expect
+        # source-data ROI metadata.
+        lat_min = data_lat_min
+        lat_max = data_lat_max
+        lon_min = data_lon_min
+        lon_max = data_lon_max
 
     mode = "interpolation"
     top_k = 10
@@ -83,12 +100,14 @@ class Config:
 
     filename = (
         f"{dataset_name}"
+        f"-pos-{position_mode}"
         f"-interp-gap-{min_gap_points}-{max_gap_points}"
         f"-past-{min_past_points}-{max_past_points}"
         f"-future-{min_future_points}-{max_future_points}"
         f"-edge-{edge_case_prob}"
         f"-samples-{train_samples_per_track}-{eval_samples_per_track}"
         f"-data_size-{lat_size}-{lon_size}-{sog_size}-{cog_size}"
+        f"-km-range-{north_km_min:.0f}-{north_km_max:.0f}-{east_km_min:.0f}-{east_km_max:.0f}"
         f"-embd_size-{n_lat_embd}-{n_lon_embd}-{n_sog_embd}-{n_cog_embd}"
         f"-head-{n_head}-{n_layer}"
         f"-bs-{batch_size}"

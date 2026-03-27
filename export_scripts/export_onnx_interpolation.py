@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import sys
 import torch
@@ -95,6 +96,37 @@ def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
         verbose=False,
     )
     print("Export completed.")
+
+    config_out = Path(onnx_path).with_name("traisformer_config.json")
+    export_config = {
+        "lat_size": cf.lat_size,
+        "lon_size": cf.lon_size,
+        "sog_size": cf.sog_size,
+        "cog_size": cf.cog_size,
+        "sog_max_knots": cf.sog_range,
+        "init_seqlen": 0,
+        "max_seqlen": cf.max_seqlen,
+        "sample_mode": "interpolation",
+        "r_vicinity": 0,
+        "top_k": cf.top_k,
+        "temperature": cf.temperature,
+        "greedy": True,
+        "prediction_steps": cf.max_gap_points,
+        "position_mode": getattr(cf, "position_mode", "global_roi"),
+        "data_lat_min": getattr(cf, "data_lat_min", None),
+        "data_lat_max": getattr(cf, "data_lat_max", None),
+        "data_lon_min": getattr(cf, "data_lon_min", None),
+        "data_lon_max": getattr(cf, "data_lon_max", None),
+        "north_km_min": getattr(cf, "north_km_min", None),
+        "north_km_max": getattr(cf, "north_km_max", None),
+        "east_km_min": getattr(cf, "east_km_min", None),
+        "east_km_max": getattr(cf, "east_km_max", None),
+        "local_origin_mode": getattr(cf, "local_origin_mode", "last_past_point"),
+    }
+    with open(config_out, "w", encoding="utf-8") as f:
+        json.dump(export_config, f, indent=2)
+        f.write("\n")
+    print(f"Wrote interpolation config to {config_out}")
 
 
 if __name__ == "__main__":
