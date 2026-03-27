@@ -18,13 +18,18 @@ class Config:
     max_seqlen = 120
     min_seqlen = 36
 
+    # Curriculum: start narrow; widen max_gap_points (and past/future caps) after loss moves.
     min_past_points = 1
-    max_past_points = 40
+    max_past_points = 10
     min_future_points = 1
-    max_future_points = 40
+    max_future_points = 10
     min_gap_points = 1
-    max_gap_points = 40
+    max_gap_points = 6
     edge_case_prob = 0.20
+
+    # Log sampled past/gap/future lengths once when building loaders (see datasets.log_gap_sampling_stats).
+    log_gap_sampling = True
+    log_gap_sample_budget = 8192
 
     train_samples_per_track = 4
     eval_samples_per_track = 1
@@ -32,15 +37,17 @@ class Config:
     dataset_name = "ct_dma"
 
     if dataset_name == "ct_dma":
-        lat_size = 250
-        lon_size = 270
-        sog_size = 30
-        cog_size = 72
+        # Coarser bins speed learning; restore e.g. 250/270/30/72 for full fidelity.
+        lat_size = 80
+        lon_size = 80
+        sog_size = 10
+        cog_size = 24
 
-        n_lat_embd = 256
-        n_lon_embd = 256
-        n_sog_embd = 128
-        n_cog_embd = 128
+        # Smaller model for faster curriculum experiments; scale up after gaps widen.
+        n_lat_embd = 128
+        n_lon_embd = 128
+        n_sog_embd = 64
+        n_cog_embd = 64
 
         lat_min = 55.5
         lat_max = 58.0
@@ -57,8 +64,8 @@ class Config:
     validset_name = f"{dataset_name}_valid.pkl"
     testset_name = f"{dataset_name}_test.pkl"
 
-    n_head = 8
-    n_layer = 8
+    n_head = 4
+    n_layer = 4
     full_size = lat_size + lon_size + sog_size + cog_size
     n_embd = n_lat_embd + n_lon_embd + n_sog_embd + n_cog_embd
     embd_pdrop = 0.1
@@ -68,8 +75,8 @@ class Config:
     learning_rate = 6e-4
     betas = (0.9, 0.95)
     grad_norm_clip = 1.0
-    weight_decay = 0.1
-    lr_decay = True
+    weight_decay = 0.01
+    lr_decay = False
     warmup_tokens = 512 * 20
     final_tokens = 260e9
     num_workers = 4

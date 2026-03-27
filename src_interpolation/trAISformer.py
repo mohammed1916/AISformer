@@ -3,9 +3,10 @@
 
 """Train and evaluate the interpolation variant of TrAISformer."""
 
+import argparse
+import logging
 import os
 import pickle
-import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -89,6 +90,14 @@ def build_datasets():
             shuffle=(phase == "train"),
             num_workers=cf.num_workers,
         )
+
+        if getattr(cf, "log_gap_sampling", False):
+            datasets.log_gap_sampling_stats(
+                aisdatasets[phase],
+                phase,
+                n_samples=getattr(cf, "log_gap_sample_budget", 8192),
+                seed=cf.seed + {"train": 0, "valid": 7, "test": 13}[phase],
+            )
 
     approx_gap = 0.5 * (cf.min_gap_points + cf.max_gap_points)
     cf.final_tokens = max(1, int(len(aisdatasets["train"]) * approx_gap * cf.max_epochs))
@@ -196,6 +205,24 @@ if __name__ == "__main__":
     else:
         print("======= Directory to store trained models: " + cf.savedir)
     utils.new_log(cf.savedir, "log")
+
+    logging.info(
+        "Interpolation config: gap [%d,%d], past [%d,%d], future [%d,%d], edge_case_prob=%s, "
+        "bins lat/lon/sog/cog=%d/%d/%d/%d, lr_decay=%s weight_decay=%s",
+        cf.min_gap_points,
+        cf.max_gap_points,
+        cf.min_past_points,
+        cf.max_past_points,
+        cf.min_future_points,
+        cf.max_future_points,
+        cf.edge_case_prob,
+        cf.lat_size,
+        cf.lon_size,
+        cf.sog_size,
+        cf.cog_size,
+        cf.lr_decay,
+        cf.weight_decay,
+    )
 
     data, aisdatasets, aisdls = build_datasets()
 

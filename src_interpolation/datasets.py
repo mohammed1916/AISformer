@@ -1,9 +1,48 @@
 # coding=utf-8
 """Datasets for trajectory interpolation."""
 
+import logging
+
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+
+logger = logging.getLogger(__name__)
+
+
+def log_gap_sampling_stats(dataset, phase_name, n_samples=8192, seed=0):
+    """Log empirical past / gap / future length distribution from the dataset sampler."""
+    n = min(n_samples, len(dataset))
+    if n <= 0:
+        logger.info("gap stats [%s]: empty dataset", phase_name)
+        return
+    rng = np.random.default_rng(seed)
+    idxs = rng.choice(len(dataset), size=n, replace=(len(dataset) < n_samples))
+    pasts, gaps, futures = [], [], []
+    for i in idxs:
+        _, _, _, _, _, pl, gl, fl, _, _ = dataset[int(i)]
+        pasts.append(int(pl))
+        gaps.append(int(gl))
+        futures.append(int(fl))
+    pasts = np.array(pasts, dtype=np.int64)
+    gaps = np.array(gaps, dtype=np.int64)
+    futures = np.array(futures, dtype=np.int64)
+
+    def _hist(name, arr):
+        lo, hi = int(arr.min()), int(arr.max())
+        counts = np.bincount(arr, minlength=hi + 1)
+        nz = np.nonzero(counts)[0]
+        parts = [f"{int(k)}:{int(counts[k])}" for k in nz]
+        return f"{name} min={lo} max={hi} mean={arr.mean():.2f} | " + " ".join(parts)
+
+    logger.info(
+        "Interpolation sampling stats [%s] (n=%d): %s; %s; %s",
+        phase_name,
+        n,
+        _hist("past", pasts),
+        _hist("gap", gaps),
+        _hist("future", futures),
+    )
 
 
 class AISInterpolationDataset(Dataset):
