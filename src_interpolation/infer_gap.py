@@ -74,12 +74,8 @@ def to_real_points(points, config, input_space):
 
     normalized = np.clip(np.asarray(points, dtype=np.float32), 0.0, 0.9999)
     real = np.empty_like(normalized, dtype=np.float32)
-    if position_utils.uses_local_position_frame(config):
-        lat, lon = position_utils.source_positions_to_real_np(normalized[:, 0], normalized[:, 1], config)
-    else:
-        lat, lon = position_utils.model_norm_to_real_np(normalized[:, 0], normalized[:, 1], config)
-    real[:, 0] = lat
-    real[:, 1] = lon
+    real[:, 0] = normalized[:, 0] * (config.lat_max - config.lat_min) + config.lat_min
+    real[:, 1] = normalized[:, 1] * (config.lon_max - config.lon_min) + config.lon_min
     real[:, 2] = normalized[:, 2] * config.sog_range
     real[:, 3] = normalized[:, 3] * 360.0
     return real
@@ -88,15 +84,8 @@ def to_real_points(points, config, input_space):
 def normalize_points(points, config, origin_lat=None, origin_lon=None):
     real = np.asarray(points, dtype=np.float32)
     normalized = np.empty_like(real, dtype=np.float32)
-    lat_norm, lon_norm, _, _ = position_utils.real_positions_to_model_norm_np(
-        real[:, 0],
-        real[:, 1],
-        config,
-        origin_lat=origin_lat,
-        origin_lon=origin_lon,
-    )
-    normalized[:, 0] = lat_norm
-    normalized[:, 1] = lon_norm
+    normalized[:, 0] = (real[:, 0] - config.lat_min) / (config.lat_max - config.lat_min)
+    normalized[:, 1] = (real[:, 1] - config.lon_min) / (config.lon_max - config.lon_min)
     normalized[:, 2] = np.clip(real[:, 2] / config.sog_range, 0.0, 0.9999)
     normalized[:, 3] = np.clip((real[:, 3] % 360.0) / 360.0, 0.0, 0.9999)
     return normalized
@@ -104,15 +93,8 @@ def normalize_points(points, config, origin_lat=None, origin_lon=None):
 
 def denormalize_points(points, config, origin_lat=None, origin_lon=None):
     real = np.empty_like(points, dtype=np.float32)
-    lat, lon = position_utils.model_norm_to_real_np(
-        points[:, 0],
-        points[:, 1],
-        config,
-        origin_lat=origin_lat,
-        origin_lon=origin_lon,
-    )
-    real[:, 0] = lat
-    real[:, 1] = lon
+    real[:, 0] = points[:, 0] * (config.lat_max - config.lat_min) + config.lat_min
+    real[:, 1] = points[:, 1] * (config.lon_max - config.lon_min) + config.lon_min
     real[:, 2] = points[:, 2] * config.sog_range
     real[:, 3] = points[:, 3] * 360.0
     return real
@@ -155,11 +137,9 @@ def main():
 
     prev_real = to_real_points(prev_points, config, args.input_space)
     next_real = to_real_points(next_points, config, args.input_space)
-    origin_lat = float(prev_real[-1, 0])
-    origin_lon = float(prev_real[-1, 1])
 
-    prev_norm = normalize_points(prev_real, config, origin_lat=origin_lat, origin_lon=origin_lon)
-    next_norm = normalize_points(next_real, config, origin_lat=origin_lat, origin_lon=origin_lon)
+    prev_norm = normalize_points(prev_real, config)
+    next_norm = normalize_points(next_real, config)
 
     seqs, token_types, valid_mask, target_mask = datasets.build_interpolation_sequence(
         prev_norm,
@@ -193,8 +173,6 @@ def main():
     predicted_gap_real = denormalize_points(
         predicted_gap_norm,
         config,
-        origin_lat=origin_lat,
-        origin_lon=origin_lon,
     )
 
     result = {
