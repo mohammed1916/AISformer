@@ -75,7 +75,7 @@ class AISInterpolationDataset(Dataset):
         self.edge_case_prob = edge_case_prob
         self.samples_per_track = samples_per_track
         self.seed = seed
-        self.config = config
+        # self.config = config  # No longer needed for global normalization
 
         self.min_total_points = (
             self.min_past_points + self.min_gap_points + self.min_future_points
@@ -138,23 +138,14 @@ class AISInterpolationDataset(Dataset):
         traj[:, :4] = np.clip(traj[:, :4], 0.0, 0.9999)
 
         track_len = len(traj)
-        past_len, gap_len, future_len = self._sample_lengths(track_len, rng)
+        past_len, orig_gap_len, future_len = self._sample_lengths(track_len, rng)
+        gap_len = max(1, orig_gap_len // 2)  # Scale down by half, at least 1
         total_len = past_len + gap_len + future_len
         start_idx = int(rng.integers(0, track_len - total_len + 1))
         window = traj[start_idx:start_idx + total_len]
 
-        encoded_window = window[:, :4]
-        origin_lat = 0.0
-        origin_lon = 0.0
-        if self.config is not None:
-            encoded_window, origin_lat, origin_lon = position_utils.encode_window_to_model_space(
-                window,
-                past_len,
-                self.config,
-            )
-
         seq = np.zeros((self.max_seqlen, 4), dtype=np.float32)
-        seq[:total_len] = encoded_window
+        seq[:total_len] = window[:, :4]
 
         token_types = np.zeros(self.max_seqlen, dtype=np.int64)
         token_types[:past_len] = 1
@@ -181,8 +172,6 @@ class AISInterpolationDataset(Dataset):
             torch.tensor(future_len, dtype=torch.long),
             torch.tensor(vessel["mmsi"], dtype=torch.long),
             torch.tensor(time_seq, dtype=torch.long),
-            torch.tensor(origin_lat, dtype=torch.float32),
-            torch.tensor(origin_lon, dtype=torch.float32),
         )
 
 
