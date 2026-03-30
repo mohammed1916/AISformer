@@ -84,7 +84,6 @@ def build_datasets():
             edge_case_prob=cf.edge_case_prob,
             samples_per_track=samples_per_track[phase],
             seed=cf.seed + {"train": 0, "valid": 10000, "test": 20000}[phase],
-            config=cf,
         )
         aisdls[phase] = DataLoader(
             aisdatasets[phase],
@@ -127,16 +126,11 @@ def evaluate(model, aisdls):
                 future_lens,
                 mmsis,
                 time_seqs,
-                origin_lats,
-                origin_lons,
             ) = batch
             seqs = seqs.to(cf.device)
             token_types = token_types.to(cf.device)
             valid_masks = valid_masks.to(cf.device)
             target_masks = target_masks.to(cf.device)
-            origin_lats = origin_lats.to(cf.device)
-            origin_lons = origin_lons.to(cf.device)
-
             preds = trainers.predict_gap(
                 model,
                 seqs,
@@ -147,18 +141,17 @@ def evaluate(model, aisdls):
                 top_k=cf.top_k,
             )
 
-            input_coords = position_utils.model_norm_to_real_torch(
-                seqs[:, :, :2],
-                cf,
-                origin_lats=origin_lats,
-                origin_lons=origin_lons,
-            ) * torch.pi / 180.0
-            pred_coords = position_utils.model_norm_to_real_torch(
-                preds[:, :, :2],
-                cf,
-                origin_lats=origin_lats,
-                origin_lons=origin_lons,
-            ) * torch.pi / 180.0
+            # Global normalization: convert [0,1) to real lat/lon
+            input_coords = seqs[:, :, :2].clone()
+            input_coords[..., 0] = input_coords[..., 0] * (cf.lat_max - cf.lat_min) + cf.lat_min
+            input_coords[..., 1] = input_coords[..., 1] * (cf.lon_max - cf.lon_min) + cf.lon_min
+            input_coords = input_coords * torch.pi / 180.0
+
+            pred_coords = preds[:, :, :2].clone()
+            pred_coords[..., 0] = pred_coords[..., 0] * (cf.lat_max - cf.lat_min) + cf.lat_min
+            pred_coords[..., 1] = pred_coords[..., 1] * (cf.lon_max - cf.lon_min) + cf.lon_min
+            pred_coords = pred_coords * torch.pi / 180.0
+
             d = utils.haversine(input_coords, pred_coords)
 
             global_error_sum += (d * target_masks).sum().item()
@@ -228,14 +221,8 @@ if __name__ == "__main__":
     utils.new_log(cf.savedir, "log")
 
     logging.info(
-        "Interpolation config: position_mode=%s local-km north[%s,%s] east[%s,%s], "
-        "gap [%d,%d], past [%d,%d], future [%d,%d], edge_case_prob=%s, "
+        "Interpolation config: gap [%d,%d], past [%d,%d], future [%d,%d], edge_case_prob=%s, "
         "bins lat/lon/sog/cog=%d/%d/%d/%d, lr_decay=%s weight_decay=%s",
-        getattr(cf, "position_mode", "global_roi"),
-        getattr(cf, "north_km_min", "n/a"),
-        getattr(cf, "north_km_max", "n/a"),
-        getattr(cf, "east_km_min", "n/a"),
-        getattr(cf, "east_km_max", "n/a"),
         cf.min_gap_points,
         cf.max_gap_points,
         cf.min_past_points,
