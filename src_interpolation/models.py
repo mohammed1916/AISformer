@@ -26,13 +26,14 @@ class TrAISformerInterpolation(nn.Module):
         self.lon_size = config.lon_size
         self.sog_size = config.sog_size
         self.cog_size = config.cog_size
+        self.heading_size = config.heading_size
         self.full_size = config.full_size
         self.max_seqlen = config.max_seqlen
 
         self.register_buffer(
             "att_sizes",
             torch.tensor(
-                [self.lat_size, self.lon_size, self.sog_size, self.cog_size],
+                [self.lat_size, self.lon_size, self.sog_size, self.cog_size, self.heading_size],
                 dtype=torch.float32,
             ),
         )
@@ -41,12 +42,14 @@ class TrAISformerInterpolation(nn.Module):
             self.lon_size,
             self.sog_size,
             self.cog_size,
+            self.heading_size,
         )
 
         self.lat_emb = nn.Embedding(self.lat_size + 1, config.n_lat_embd)
         self.lon_emb = nn.Embedding(self.lon_size + 1, config.n_lon_embd)
         self.sog_emb = nn.Embedding(self.sog_size + 1, config.n_sog_embd)
         self.cog_emb = nn.Embedding(self.cog_size + 1, config.n_cog_embd)
+        self.heading_emb = nn.Embedding(self.heading_size + 1, config.n_heading_embd)
         self.segment_emb = nn.Embedding(4, config.n_embd)
         self.pos_emb = nn.Parameter(torch.zeros(1, config.max_seqlen, config.n_embd))
         self.drop = nn.Dropout(config.embd_pdrop)
@@ -128,8 +131,9 @@ class TrAISformerInterpolation(nn.Module):
         lon_embeddings = self.lon_emb(inputs[:, :, 1])
         sog_embeddings = self.sog_emb(inputs[:, :, 2])
         cog_embeddings = self.cog_emb(inputs[:, :, 3])
+        heading_embeddings = self.heading_emb(inputs[:, :, 4])
         token_embeddings = torch.cat(
-            (lat_embeddings, lon_embeddings, sog_embeddings, cog_embeddings),
+            (lat_embeddings, lon_embeddings, sog_embeddings, cog_embeddings, heading_embeddings),
             dim=-1,
         )
 
@@ -146,9 +150,9 @@ class TrAISformerInterpolation(nn.Module):
 
         loss = None
         if with_targets:
-            lat_logits, lon_logits, sog_logits, cog_logits = torch.split(
+            lat_logits, lon_logits, sog_logits, cog_logits, heading_logits = torch.split(
                 logits,
-                (self.lat_size, self.lon_size, self.sog_size, self.cog_size),
+                (self.lat_size, self.lon_size, self.sog_size, self.cog_size, self.heading_size),
                 dim=-1,
             )
 
@@ -172,8 +176,13 @@ class TrAISformerInterpolation(nn.Module):
                 idxs[:, :, 3].reshape(-1),
                 reduction="none",
             ).view(batchsize, seqlen)
+            heading_loss = F.cross_entropy(
+                heading_logits.reshape(-1, self.heading_size),
+                idxs[:, :, 4].reshape(-1),
+                reduction="none",
+            ).view(batchsize, seqlen)
 
-            loss = lat_loss + lon_loss + sog_loss + cog_loss
+            loss = lat_loss + lon_loss + sog_loss + cog_loss + heading_loss
             if target_mask is not None:
                 denom = target_mask.sum(dim=1).clamp_min(1.0)
                 loss = (loss * target_mask).sum(dim=1) / denom

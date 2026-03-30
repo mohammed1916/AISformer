@@ -135,7 +135,7 @@ class AISInterpolationDataset(Dataset):
         rng = self._make_rng(idx)
         vessel = self.l_data[track_idx]
         traj = vessel["traj"].copy()
-        traj[:, :4] = np.clip(traj[:, :4], 0.0, 0.9999)
+        traj[:, :5] = np.clip(traj[:, :5], 0.0, 0.9999)
 
         track_len = len(traj)
         past_len, orig_gap_len, future_len = self._sample_lengths(track_len, rng)
@@ -144,8 +144,8 @@ class AISInterpolationDataset(Dataset):
         start_idx = int(rng.integers(0, track_len - total_len + 1))
         window = traj[start_idx:start_idx + total_len]
 
-        seq = np.zeros((self.max_seqlen, 4), dtype=np.float32)
-        seq[:total_len] = window[:, :4]
+        seq = np.zeros((self.max_seqlen, 5), dtype=np.float32)
+        seq[:total_len] = window[:, :5]
 
         token_types = np.zeros(self.max_seqlen, dtype=np.int64)
         token_types[:past_len] = 1

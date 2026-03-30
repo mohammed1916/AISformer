@@ -42,12 +42,14 @@ class Config:
         lon_size = 80
         sog_size = 10
         cog_size = 24
+        heading_size = 24  # Add heading bins (e.g., 24 for 15-degree bins)
 
         # Smaller model for faster curriculum experiments; scale up after gaps widen.
         n_lat_embd = 128
         n_lon_embd = 128
         n_sog_embd = 64
         n_cog_embd = 64
+        n_heading_embd = 64
 
         lat_min = 55.5
         lat_max = 58.0
@@ -66,8 +68,8 @@ class Config:
 
     n_head = 4
     n_layer = 4
-    full_size = lat_size + lon_size + sog_size + cog_size
-    n_embd = n_lat_embd + n_lon_embd + n_sog_embd + n_cog_embd
+    full_size = lat_size + lon_size + sog_size + cog_size + heading_size
+    n_embd = n_lat_embd + n_lon_embd + n_sog_embd + n_cog_embd + n_heading_embd
     embd_pdrop = 0.1
     resid_pdrop = 0.1
     attn_pdrop = 0.1
