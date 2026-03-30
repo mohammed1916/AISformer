@@ -96,8 +96,6 @@ class Trainer:
             future_lens,
             mmsis,
             time_seqs,
-            origin_lats,
-            origin_lons,
         ) = next(iter(self.aisdls["test"]))
         n_plots = min(6, seqs.shape[0])
         seqs = seqs[:n_plots].to(self.device)
@@ -174,8 +172,6 @@ class Trainer:
                     future_lens,
                     mmsis,
                     time_seqs,
-                    origin_lats,
-                    origin_lons,
                 ) = batch
                 seqs = seqs.to(self.device)
                 token_types = token_types.to(self.device)
