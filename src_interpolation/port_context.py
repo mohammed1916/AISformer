@@ -15,11 +15,8 @@ EARTH_RADIUS_KM = 6371.0088
 _EPS = 1e-6
 _OBSERVED_TOKEN_IDS = (1, 3)
 _DEFAULT_PORT_CSV = (
-    Path(__file__).resolve().parents[2]
-    / "app"
-    / "marine_backend"
-    / "dataset"
-    / "port"
+    Path(__file__).resolve().parents[1]
+    / "data"
     / "UpdatedPub150.csv"
 )
 
@@ -100,6 +97,33 @@ class PortContextEncoder:
         df = df.dropna(subset=["Latitude", "Longitude"]).copy()
         df["lat"] = df["Latitude"].astype(float)
         df["lon"] = df["Longitude"].astype(float)
+
+        # Filter to only ports within the specified quadrilateral
+        # Box corners: TL: (61.485781, -4.386107), TR: (61.164516, 25.463949),
+        #              BR: (49.712745, 27.918907), BL: (50.570908, -4.218724)
+        def point_in_quad(lat, lon):
+            # Use winding number algorithm for convex quad
+            from matplotlib.path import Path as MplPath
+            quad = [
+                (61.485781, -4.386107),  # TL
+                (61.164516, 25.463949),  # TR
+                (49.712745, 27.918907),  # BR
+                (50.570908, -4.218724),  # BL
+            ]
+            path = MplPath(quad, closed=True)
+            return path.contains_point((lat, lon))
+
+        # Vectorized check for all points
+        from matplotlib.path import Path as MplPath
+        quad = [
+            (61.485781, -4.386107),  # TL
+            (61.164516, 25.463949),  # TR
+            (49.712745, 27.918907),  # BR
+            (50.570908, -4.218724),  # BL
+        ]
+        path = MplPath(quad, closed=True)
+        mask = path.contains_points(df[["lat", "lon"]].values)
+        df = df[mask].copy()
         return df
 
     def _encode_single_uncached(self, lat: float, lon: float) -> tuple[float, ...]:
