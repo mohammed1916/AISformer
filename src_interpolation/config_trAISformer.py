@@ -76,6 +76,12 @@ class Config:
     port_cache_size = 200000
     port_cache_round_decimals = 3
 
+    use_land_context = True
+    land_distance_scale_km = 80.0
+    land_context_size = 4
+    land_cache_size = 200000
+    land_cache_round_decimals = 3
+
     mode = "interpolation"
     top_k = 10
     temperature = 1.0
@@ -113,6 +119,7 @@ class Config:
         f"-data_size-{lat_size}-{lon_size}-{sog_size}-{cog_size}"
         f"-embd_size-{n_lat_embd}-{n_lon_embd}-{n_sog_embd}-{n_cog_embd}"
         f"-port-{int(use_port_context)}-{port_nearest_k}-{port_max_distance_km:.0f}"
+        f"-land-{int(use_land_context)}-{land_distance_scale_km:.0f}"
         f"-head-{n_head}-{n_layer}"
         f"-bs-{batch_size}"
         f"-lr-{learning_rate}"

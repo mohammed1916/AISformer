@@ -128,18 +128,21 @@ def evaluate(model, aisdls):
                 mmsis,
                 time_seqs,
                 port_features,
+                land_features,
             ) = batch
             seqs = seqs.to(cf.device)
             token_types = token_types.to(cf.device)
             valid_masks = valid_masks.to(cf.device)
             target_masks = target_masks.to(cf.device)
             port_features = port_features.to(cf.device)
+            land_features = land_features.to(cf.device)
             preds = trainers.predict_gap(
                 model,
                 seqs,
                 token_types,
                 valid_masks,
                 port_context=port_features,
+                land_context=land_features,
                 sample=False,
                 temperature=cf.temperature,
                 top_k=cf.top_k,
@@ -226,7 +229,7 @@ if __name__ == "__main__":
 
     logging.info(
         "Interpolation config: gap [%d,%d], past [%d,%d], future [%d,%d], edge_case_prob=%s, "
-        "bins lat/lon/sog/cog=%d/%d/%d/%d, port_context=%s(%d), lr_decay=%s weight_decay=%s",
+        "bins lat/lon/sog/cog=%d/%d/%d/%d, port_context=%s(%d), land_context=%s(%d), lr_decay=%s weight_decay=%s",
         cf.min_gap_points,
         cf.max_gap_points,
         cf.min_past_points,
@@ -240,6 +243,8 @@ if __name__ == "__main__":
         cf.cog_size,
         getattr(cf, "use_port_context", False),
         getattr(cf, "port_context_size", 0),
+        getattr(cf, "use_land_context", False),
+        getattr(cf, "land_context_size", 0),
         cf.lr_decay,
         cf.weight_decay,
     )

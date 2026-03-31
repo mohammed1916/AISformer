@@ -76,3 +76,36 @@ graph TD
     end
     K
 ```
+
+## Computational Complexity: Land and Port Context
+
+The computational cost of adding land and port context features depends on the number of trajectory points, ports, and land polygons, as well as the use of spatial indexing. Below is a summary of the Big O complexity for different scenarios:
+
+### Port Context Encoder
+- For each trajectory point, distances to all filtered ports are computed and the k-nearest are selected.
+- Let $N$ = number of trajectory points per batch, $P$ = number of ports, $k$ = nearest ports used (small).
+- **Complexity:**
+  - Per point: $O(P)$
+  - All points: $O(NP)$
+
+### Land Context Encoder
+- For each trajectory point, the distance to the nearest land/coastline is computed.
+- Let $L$ = number of land polygons/segments.
+- **Naive:** $O(NL)$
+- **With spatial index (e.g., R-tree):** $O(N \log L)$
+
+### Combined Context
+- **Total:** $O(NP + NL)$ (naive), $O(NP + N \log L)$ (with spatial index)
+
+### Scenarios Table
+| Scenario                        | Port Context | Land Context (naive) | Land Context (spatial index) | Combined                           |
+| ------------------------------- | ------------ | -------------------- | ---------------------------- | ---------------------------------- |
+| Small $P$, small $L$            | $O(N)$       | $O(N)$               | $O(N)$                       | $O(N)$                             |
+| Large $P$, small $L$            | $O(NP)$      | $O(N)$               | $O(N)$                       | $O(NP)$                            |
+| Small $P$, large $L$ (no index) | $O(N)$       | $O(NL)$              | $O(N \log L)$                | $O(NL)$                            |
+| Large $P$, large $L$ (no index) | $O(NP)$      | $O(NL)$              | $O(N \log L)$                | $O(NP + NL)$ or $O(NP + N \log L)$ |
+
+**Key Points:**
+- The main cost is linear in the number of trajectory points and the number of ports/land polygons.
+- Using spatial indexing for land context is highly recommended for scalability.
+- For typical $k$ (nearest ports) and batch sizes, the cost is dominated by $P$ and $L$.

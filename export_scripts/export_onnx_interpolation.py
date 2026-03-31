@@ -94,6 +94,15 @@ def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
         export_args.append(dummy_port_context)
         input_names.append("port_context")
         dynamic_axes["port_context"] = {0: "batch", 1: "seq_len"}
+    if getattr(cf, "use_land_context", False):
+        dummy_land_context = torch.zeros(
+            (1, seq_len, int(getattr(cf, "land_context_size", 0))),
+            dtype=torch.float32,
+            device=device,
+        )
+        export_args.append(dummy_land_context)
+        input_names.append("land_context")
+        dynamic_axes["land_context"] = {0: "batch", 1: "seq_len"}
 
     print(f"Exporting ONNX model to {onnx_path} (seq_len={seq_len})...")
     torch.onnx.export(
@@ -139,6 +148,9 @@ def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
         "port_nearest_k": int(getattr(cf, "port_nearest_k", 0)),
         "port_max_distance_km": float(getattr(cf, "port_max_distance_km", 0.0)),
         "port_distance_scale_km": float(getattr(cf, "port_distance_scale_km", 0.0)),
+        "use_land_context": bool(getattr(cf, "use_land_context", False)),
+        "land_context_size": int(getattr(cf, "land_context_size", 0)),
+        "land_distance_scale_km": float(getattr(cf, "land_distance_scale_km", 0.0)),
     }
     with open(config_out, "w", encoding="utf-8") as f:
         json.dump(export_config, f, indent=2)

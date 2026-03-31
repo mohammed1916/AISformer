@@ -12,6 +12,7 @@ import numpy as np
 import torch
 
 import datasets
+import land_context
 import models
 import port_context
 import position_utils
@@ -143,18 +144,23 @@ def main():
     next_norm = normalize_points(next_real, config)
 
     encoder = None
+    land_encoder = None
     if getattr(config, "use_port_context", False):
         encoder = port_context.PortContextEncoder.from_config(config)
+    if getattr(config, "use_land_context", False):
+        land_encoder = land_context.LandContextEncoder.from_config(config)
 
-    seqs, token_types, valid_mask, target_mask, port_features = datasets.build_interpolation_sequence(
+    seqs, token_types, valid_mask, target_mask, port_features, land_features = datasets.build_interpolation_sequence(
         prev_norm,
         next_norm,
         args.gap_len,
         config.max_seqlen,
         port_encoder=encoder,
+        land_encoder=land_encoder,
         prev_real_points=prev_real[:, :2],
         next_real_points=next_real[:, :2],
         port_context_size=getattr(config, "port_context_size", 0),
+        land_context_size=getattr(config, "land_context_size", 0),
     )
 
     checkpoint = find_checkpoint(config, args.checkpoint)
@@ -166,6 +172,7 @@ def main():
     token_types = token_types.to(config.device)
     valid_mask = valid_mask.to(config.device)
     port_features = port_features.to(config.device)
+    land_features = land_features.to(config.device)
 
     completed = trainers.predict_gap(
         model,
@@ -173,6 +180,7 @@ def main():
         token_types,
         valid_mask,
         port_context=port_features,
+        land_context=land_features,
         sample=args.sample,
         temperature=args.temperature if args.temperature is not None else config.temperature,
         top_k=args.top_k if args.top_k is not None else config.top_k,

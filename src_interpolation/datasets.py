@@ -7,6 +7,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+import land_context
 import port_context
 import position_utils
 
@@ -23,7 +24,7 @@ def log_gap_sampling_stats(dataset, phase_name, n_samples=8192, seed=0):
     idxs = rng.choice(len(dataset), size=n, replace=(len(dataset) < n_samples))
     pasts, gaps, futures = [], [], []
     for i in idxs:
-        _, _, _, _, _, pl, gl, fl, _, _, _ = dataset[int(i)]
+        _, _, _, _, _, pl, gl, fl, _, _, _, _ = dataset[int(i)]
         pasts.append(int(pl))
         gaps.append(int(gl))
         futures.append(int(fl))
@@ -79,9 +80,14 @@ class AISInterpolationDataset(Dataset):
         self.config = config
         self.port_encoder = None
         self.port_context_size = 0
+        self.land_encoder = None
+        self.land_context_size = 0
         if config is not None and getattr(config, "use_port_context", False):
             self.port_encoder = port_context.PortContextEncoder.from_config(config)
             self.port_context_size = self.port_encoder.context_size
+        if config is not None and getattr(config, "use_land_context", False):
+            self.land_encoder = land_context.LandContextEncoder.from_config(config)
+            self.land_context_size = self.land_encoder.context_size
 
         self.min_total_points = (
             self.min_past_points + self.min_gap_points + self.min_future_points
@@ -169,17 +175,25 @@ class AISInterpolationDataset(Dataset):
             time_seq[:total_len] = window[:, 4].astype(np.int64)
 
         port_features = np.zeros((self.max_seqlen, self.port_context_size), dtype=np.float32)
-        if self.port_encoder is not None and total_len > 0:
+        land_features = np.zeros((self.max_seqlen, self.land_context_size), dtype=np.float32)
+        if (self.port_encoder is not None or self.land_encoder is not None) and total_len > 0:
             real_lats, real_lons = position_utils.source_positions_to_real_np(
                 window[:, 0],
                 window[:, 1],
                 self.config,
             )
-            port_features[:total_len] = self.port_encoder.encode_positions(
-                real_lats,
-                real_lons,
-                token_types=token_types[:total_len],
-            )
+            if self.port_encoder is not None:
+                port_features[:total_len] = self.port_encoder.encode_positions(
+                    real_lats,
+                    real_lons,
+                    token_types=token_types[:total_len],
+                )
+            if self.land_encoder is not None:
+                land_features[:total_len] = self.land_encoder.encode_positions(
+                    real_lats,
+                    real_lons,
+                    token_types=token_types[:total_len],
+                )
 
         return (
             torch.tensor(seq, dtype=torch.float32),
@@ -193,6 +207,7 @@ class AISInterpolationDataset(Dataset):
             torch.tensor(vessel["mmsi"], dtype=torch.long),
             torch.tensor(time_seq, dtype=torch.long),
             torch.tensor(port_features, dtype=torch.float32),
+            torch.tensor(land_features, dtype=torch.float32),
         )
 
 
@@ -202,9 +217,11 @@ def build_interpolation_sequence(
     gap_len,
     max_seqlen,
     port_encoder=None,
+    land_encoder=None,
     prev_real_points=None,
     next_real_points=None,
     port_context_size=None,
+    land_context_size=None,
 ):
     """Build a padded interpolation example from observed past and future tracks."""
 
@@ -235,6 +252,9 @@ def build_interpolation_sequence(
     if port_context_size is None:
         port_context_size = 0 if port_encoder is None else int(port_encoder.context_size)
     port_features = np.zeros((max_seqlen, int(port_context_size)), dtype=np.float32)
+    if land_context_size is None:
+        land_context_size = 0 if land_encoder is None else int(land_encoder.context_size)
+    land_features = np.zeros((max_seqlen, int(land_context_size)), dtype=np.float32)
     if port_encoder is not None and int(port_context_size) > 0:
         if prev_real_points is None or next_real_points is None:
             raise ValueError("Real previous/future positions are required to build port context.")
@@ -250,6 +270,21 @@ def build_interpolation_sequence(
             next_real_points[:, 1],
             token_types=np.full(len(next_seq), 3, dtype=np.int64),
         )
+    if land_encoder is not None and int(land_context_size) > 0:
+        if prev_real_points is None or next_real_points is None:
+            raise ValueError("Real previous/future positions are required to build land context.")
+        prev_real_points = np.asarray(prev_real_points, dtype=np.float32)
+        next_real_points = np.asarray(next_real_points, dtype=np.float32)
+        land_features[:len(prev_seq)] = land_encoder.encode_positions(
+            prev_real_points[:, 0],
+            prev_real_points[:, 1],
+            token_types=np.full(len(prev_seq), 1, dtype=np.int64),
+        )
+        land_features[len(prev_seq) + gap_len:total_len] = land_encoder.encode_positions(
+            next_real_points[:, 0],
+            next_real_points[:, 1],
+            token_types=np.full(len(next_seq), 3, dtype=np.int64),
+        )
 
     return (
         torch.tensor(seq, dtype=torch.float32).unsqueeze(0),
@@ -257,4 +292,5 @@ def build_interpolation_sequence(
         torch.tensor(valid_mask, dtype=torch.float32).unsqueeze(0),
         torch.tensor(target_mask, dtype=torch.float32).unsqueeze(0),
         torch.tensor(port_features, dtype=torch.float32).unsqueeze(0),
+        torch.tensor(land_features, dtype=torch.float32).unsqueeze(0),
     )

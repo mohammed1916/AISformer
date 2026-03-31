@@ -32,6 +32,7 @@ class PortContextEncoder:
         distance_scale_km: float | None = None,
         cache_size: int = 200000,
         cache_round_decimals: int = 3,
+        use_gpu: bool = False,
     ):
         self.csv_path = Path(csv_path).expanduser().resolve()
         self.nearest_k = max(0, int(nearest_k))
@@ -40,9 +41,11 @@ class PortContextEncoder:
         self.cache_round_decimals = max(0, int(cache_round_decimals))
         self.context_size = self.nearest_k * 4
 
+
         df = self._load(self.csv_path)
         self.port_lats = df["lat"].to_numpy(dtype=np.float64)
         self.port_lons = df["lon"].to_numpy(dtype=np.float64)
+        self.use_gpu = use_gpu
 
         self._encode_cached = lru_cache(maxsize=max(1, int(cache_size)))(
             self._encode_single_uncached
@@ -82,11 +85,65 @@ class PortContextEncoder:
                 raise ValueError("token_types length must match port context positions.")
             observed_mask = np.isin(token_types, _OBSERVED_TOKEN_IDS)
 
+        if self.use_gpu:
+            try:
+                import cupy as cp
+                return self._encode_positions_cupy(lats, lons, observed_mask, cp)
+            except ImportError:
+                print("CuPy not available, falling back to CPU/NumPy.")
+
         for idx in np.flatnonzero(observed_mask):
             lat_key = round(float(lats[idx]), self.cache_round_decimals)
             lon_key = round(float(lons[idx]), self.cache_round_decimals)
             out[idx] = np.asarray(self._encode_cached(lat_key, lon_key), dtype=np.float32)
 
+        return out
+
+    def _encode_positions_cupy(self, lats, lons, observed_mask, cp):
+        # Batch all observed points and all ports to GPU for distance computation
+        obs_idx = np.flatnonzero(observed_mask)
+        if obs_idx.size == 0:
+            return np.zeros((lats.size, self.context_size), dtype=np.float32)
+        lat_points = cp.asarray(lats[obs_idx])
+        lon_points = cp.asarray(lons[obs_idx])
+        port_lats = cp.asarray(self.port_lats)
+        port_lons = cp.asarray(self.port_lons)
+        # Compute haversine distances (vectorized)
+        lat1 = cp.radians(lat_points)[:, None]
+        lon1 = cp.radians(lon_points)[:, None]
+        lat2 = cp.radians(port_lats)[None, :]
+        lon2 = cp.radians(port_lons)[None, :]
+        dlat = lat2 - lat1
+        dlon = lon2 - lon1
+        a = cp.sin(dlat / 2.0) ** 2 + cp.cos(lat1) * cp.cos(lat2) * cp.sin(dlon / 2.0) ** 2
+        c = 2.0 * cp.arctan2(cp.sqrt(a), cp.sqrt(cp.maximum(1.0 - a, 0.0)))
+        dists = EARTH_RADIUS_KM * c  # (n_obs, n_ports)
+        # Mask out ports beyond max_distance_km
+        mask = dists <= self.max_distance_km
+        features = cp.zeros((obs_idx.size, self.nearest_k, 4), dtype=cp.float32)
+        for i in range(obs_idx.size):
+            valid = mask[i].get()
+            if not valid.any():
+                continue
+            dists_i = dists[i].get()
+            valid_idx = np.flatnonzero(valid)
+            if valid_idx.size > self.nearest_k:
+                nearest_local = np.argpartition(dists_i[valid], self.nearest_k - 1)[: self.nearest_k]
+                nearest = valid_idx[nearest_local]
+            else:
+                nearest = valid_idx
+            nearest = nearest[np.argsort(dists_i[nearest])]
+            sel_lats = self.port_lats[nearest]
+            sel_lons = self.port_lons[nearest]
+            sel_dists = dists_i[nearest]
+            north_km, east_km = self._relative_offsets_km(float(lats[obs_idx[i]]), float(lons[obs_idx[i]]), sel_lats, sel_lons)
+            count = min(nearest.size, self.nearest_k)
+            features[i, :count, 0] = 1.0
+            features[i, :count, 1] = np.clip(north_km[:count] / self.distance_scale_km, -1.0, 1.0)
+            features[i, :count, 2] = np.clip(east_km[:count] / self.distance_scale_km, -1.0, 1.0)
+            features[i, :count, 3] = np.clip(sel_dists[:count] / self.distance_scale_km, 0.0, 1.0)
+        out = np.zeros((lats.size, self.context_size), dtype=np.float32)
+        out[obs_idx] = cp.asnumpy(features.reshape(obs_idx.size, -1))
         return out
 
     @staticmethod

@@ -61,6 +61,7 @@ def predict_gap(
     token_types,
     valid_masks,
     port_context=None,
+    land_context=None,
     sample=False,
     temperature=1.0,
     top_k=None,
@@ -71,6 +72,7 @@ def predict_gap(
         token_types=token_types,
         valid_mask=valid_masks,
         port_context=port_context,
+        land_context=land_context,
         with_targets=False,
     )
     decoded = decode_logits(model, logits, sample=sample, temperature=temperature, top_k=top_k)
@@ -112,12 +114,14 @@ class Trainer:
             mmsis,
             time_seqs,
             port_features,
+            land_features,
         ) = next(iter(self.aisdls["test"]))
         n_plots = min(6, seqs.shape[0])
         seqs = seqs[:n_plots].to(self.device)
         token_types = token_types[:n_plots].to(self.device)
         valid_masks = valid_masks[:n_plots].to(self.device)
         port_features = port_features[:n_plots].to(self.device)
+        land_features = land_features[:n_plots].to(self.device)
 
         preds = predict_gap(
             raw_model,
@@ -125,6 +129,7 @@ class Trainer:
             token_types,
             valid_masks,
             port_context=port_features,
+            land_context=land_features,
             sample=False,
             temperature=self.config.temperature,
             top_k=self.config.top_k,
@@ -191,12 +196,14 @@ class Trainer:
                     mmsis,
                     time_seqs,
                     port_features,
+                    land_features,
                 ) = batch
                 seqs = seqs.to(self.device)
                 token_types = token_types.to(self.device)
                 valid_masks = valid_masks.to(self.device)
                 target_masks = target_masks.to(self.device)
                 port_features = port_features.to(self.device)
+                land_features = land_features.to(self.device)
 
                 with torch.set_grad_enabled(is_train):
                     _, loss = model(
@@ -205,6 +212,7 @@ class Trainer:
                         valid_mask=valid_masks,
                         target_mask=target_masks,
                         port_context=port_features,
+                        land_context=land_features,
                         with_targets=True,
                     )
                     loss = loss.mean()

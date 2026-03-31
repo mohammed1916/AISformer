@@ -1,6 +1,6 @@
 graph TD
     A[Data Preparation] --> B["Window Sampling (Past, Gap, Future)"]
-    B --> C["Input Construction (Padding, Token Types, Port Context)"]
+    B --> C["Input Construction (Padding, Token Types, Port & Land Context)"]
     C --> D[Model: TrAISformerInterpolation]
     D --> E[Transformer Encoder Layers]
     E --> F["Prediction Head (Lat, Lon, SOG, COG)"]
@@ -10,7 +10,10 @@ graph TD
     I --> J[Qualitative Plots & Evaluation]
     J --> K[Model Output: Interpolated Trajectories]
     C --> L["Port Context Encoder (Filters Ports in Region)"]
+    C --> M["Land Context Encoder (Distance to Coast/Land)"]
     L --> C
+    M --> C
+    
     subgraph DataLoader
         A
         B
@@ -28,3 +31,23 @@ graph TD
         J
     end
     K
+
+    %% Technical Details Subgraph
+    subgraph TechnicalDetails[Technical Details]
+        T1["Input Shape: (batch, max_seqlen, 4)<br>Features: [lat, lon, sog, cog] (normalized)"]
+        T2["Token Types: (batch, max_seqlen)<br>1=Past, 2=Gap, 3=Future, 0=Pad"]
+        T3["Gap Insertion: Random window, gap segment masked (token type 2)"]
+        T4["Masking: Model input for gap is replaced with special mask token"]
+        T5["Output Shape: (batch, max_seqlen, lat_bins+lon_bins+sog_bins+cog_bins)"]
+        T6["Loss: Cross-entropy only on gap segment (token type 2)<br>Loss = sum(mask * CE(pred, target)) / sum(mask)"]
+        T7["Port Context: (batch, max_seqlen, port_context_size)<br>For each point: k-nearest port distances, offsets, normalized<br>Only for points in region, projected and added to input embedding"]
+        T8["Land Context: (batch, max_seqlen, land_context_size)<br>For each point: distance to nearest land/coast, relative position<br>Only for valid points, projected and added to input embedding"]
+    end
+    C -.-> T1
+    C -.-> T2
+    B -.-> T3
+    D -.-> T4
+    F -.-> T5
+    G -.-> T6
+    L -.-> T7
+    M -.-> T8

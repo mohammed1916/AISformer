@@ -30,6 +30,8 @@ class TrAISformerInterpolation(nn.Module):
         self.max_seqlen = config.max_seqlen
         self.use_port_context = bool(getattr(config, "use_port_context", False))
         self.port_context_size = int(getattr(config, "port_context_size", 0))
+        self.use_land_context = bool(getattr(config, "use_land_context", False))
+        self.land_context_size = int(getattr(config, "land_context_size", 0))
 
         self.register_buffer(
             "att_sizes",
@@ -55,6 +57,9 @@ class TrAISformerInterpolation(nn.Module):
         self.port_proj = None
         if self.use_port_context and self.port_context_size > 0:
             self.port_proj = nn.Linear(self.port_context_size, config.n_embd, bias=False)
+        self.land_proj = None
+        if self.use_land_context and self.land_context_size > 0:
+            self.land_proj = nn.Linear(self.land_context_size, config.n_embd, bias=False)
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config.n_embd,
@@ -131,6 +136,7 @@ class TrAISformerInterpolation(nn.Module):
         valid_mask=None,
         target_mask=None,
         port_context=None,
+        land_context=None,
         with_targets=False,
     ):
         if x.size(-1) != len(self.mask_token_ids):
@@ -161,6 +167,12 @@ class TrAISformerInterpolation(nn.Module):
                     f"Expected port_context with last dimension {self.port_context_size}, got {port_context.size(-1)}."
                 )
             hidden = hidden + self.port_proj(self._masked_port_context(port_context, token_types))
+        if land_context is not None and self.land_proj is not None:
+            if land_context.size(-1) != self.land_context_size:
+                raise ValueError(
+                    f"Expected land_context with last dimension {self.land_context_size}, got {land_context.size(-1)}."
+                )
+            hidden = hidden + self.land_proj(self._masked_port_context(land_context, token_types))
 
         hidden = self.drop(hidden)
         padding_mask = None if valid_mask is None else ~valid_mask.bool()
