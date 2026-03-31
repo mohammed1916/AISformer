@@ -1,0 +1,30 @@
+graph TD
+    A[Data Preparation] --> B["Window Sampling (Past, Gap, Future)"]
+    B --> C["Input Construction (Padding, Token Types, Port Context)"]
+    C --> D[Model: TrAISformerInterpolation]
+    D --> E[Transformer Encoder Layers]
+    E --> F["Prediction Head (Lat, Lon, SOG, COG)"]
+    F --> G["Loss Computation (Cross-Entropy on Gap)"]
+    G --> H["Optimizer (AdamW), LR Scheduling, Grad Clipping"]
+    H --> I[Validation & Checkpointing]
+    I --> J[Qualitative Plots & Evaluation]
+    J --> K[Model Output: Interpolated Trajectories]
+    C --> L["Port Context Encoder (Filters Ports in Region)"]
+    L --> C
+    subgraph DataLoader
+        A
+        B
+        C
+    end
+    subgraph Model
+        D
+        E
+        F
+    end
+    subgraph Training
+        G
+        H
+        I
+        J
+    end
+    K
