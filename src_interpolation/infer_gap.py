@@ -13,6 +13,7 @@ import torch
 
 import datasets
 import models
+import port_context
 import position_utils
 import trainers
 from config_trAISformer import Config
@@ -141,11 +142,19 @@ def main():
     prev_norm = normalize_points(prev_real, config)
     next_norm = normalize_points(next_real, config)
 
-    seqs, token_types, valid_mask, target_mask = datasets.build_interpolation_sequence(
+    encoder = None
+    if getattr(config, "use_port_context", False):
+        encoder = port_context.PortContextEncoder.from_config(config)
+
+    seqs, token_types, valid_mask, target_mask, port_features = datasets.build_interpolation_sequence(
         prev_norm,
         next_norm,
         args.gap_len,
         config.max_seqlen,
+        port_encoder=encoder,
+        prev_real_points=prev_real[:, :2],
+        next_real_points=next_real[:, :2],
+        port_context_size=getattr(config, "port_context_size", 0),
     )
 
     checkpoint = find_checkpoint(config, args.checkpoint)
@@ -156,12 +165,14 @@ def main():
     seqs = seqs.to(config.device)
     token_types = token_types.to(config.device)
     valid_mask = valid_mask.to(config.device)
+    port_features = port_features.to(config.device)
 
     completed = trainers.predict_gap(
         model,
         seqs,
         token_types,
         valid_mask,
+        port_context=port_features,
         sample=args.sample,
         temperature=args.temperature if args.temperature is not None else config.temperature,
         top_k=args.top_k if args.top_k is not None else config.top_k,
@@ -179,7 +190,7 @@ def main():
         "checkpoint": str(checkpoint),
         "gap_len": args.gap_len,
         "input_space": args.input_space,
-        "origin": {"lat": origin_lat, "lon": origin_lon},
+        "origin": None,
         "predicted_gap_normalized": predicted_gap_norm.tolist(),
         "predicted_gap_real": predicted_gap_real.tolist(),
     }

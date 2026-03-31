@@ -2,6 +2,7 @@
 """Configuration flags for interpolation training."""
 
 import os
+
 import torch
 
 
@@ -42,20 +43,38 @@ class Config:
         lon_size = 80
         sog_size = 10
         cog_size = 24
-        heading_size = 24  # Add heading bins (e.g., 24 for 15-degree bins)
 
         # Smaller model for faster curriculum experiments; scale up after gaps widen.
         n_lat_embd = 128
         n_lon_embd = 128
         n_sog_embd = 64
         n_cog_embd = 64
-        n_heading_embd = 64
 
         lat_min = 55.5
         lat_max = 58.0
         lon_min = 10.3
         lon_max = 13.0
         sog_range = 30.0
+
+    position_mode = "global_roi"
+    data_lat_min = lat_min
+    data_lat_max = lat_max
+    data_lon_min = lon_min
+    data_lon_max = lon_max
+    north_km_min = -150.0
+    north_km_max = 150.0
+    east_km_min = -150.0
+    east_km_max = 150.0
+    local_origin_mode = "last_past_point"
+
+    use_port_context = True
+    port_nearest_k = 3
+    port_max_distance_km = 120.0
+    port_distance_scale_km = 120.0
+    port_feature_size = 4
+    port_context_size = port_nearest_k * port_feature_size
+    port_cache_size = 200000
+    port_cache_round_decimals = 3
 
     mode = "interpolation"
     top_k = 10
@@ -68,8 +87,8 @@ class Config:
 
     n_head = 4
     n_layer = 4
-    full_size = lat_size + lon_size + sog_size + cog_size + heading_size
-    n_embd = n_lat_embd + n_lon_embd + n_sog_embd + n_cog_embd + n_heading_embd
+    full_size = lat_size + lon_size + sog_size + cog_size
+    n_embd = n_lat_embd + n_lon_embd + n_sog_embd + n_cog_embd
     embd_pdrop = 0.1
     resid_pdrop = 0.1
     attn_pdrop = 0.1
@@ -92,8 +111,8 @@ class Config:
         f"-edge-{edge_case_prob}"
         f"-samples-{train_samples_per_track}-{eval_samples_per_track}"
         f"-data_size-{lat_size}-{lon_size}-{sog_size}-{cog_size}"
-        f"-km-range-{north_km_min:.0f}-{north_km_max:.0f}-{east_km_min:.0f}-{east_km_max:.0f}"
         f"-embd_size-{n_lat_embd}-{n_lon_embd}-{n_sog_embd}-{n_cog_embd}"
+        f"-port-{int(use_port_context)}-{port_nearest_k}-{port_max_distance_km:.0f}"
         f"-head-{n_head}-{n_layer}"
         f"-bs-{batch_size}"
         f"-lr-{learning_rate}"

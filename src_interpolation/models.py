@@ -26,14 +26,15 @@ class TrAISformerInterpolation(nn.Module):
         self.lon_size = config.lon_size
         self.sog_size = config.sog_size
         self.cog_size = config.cog_size
-        self.heading_size = config.heading_size
         self.full_size = config.full_size
         self.max_seqlen = config.max_seqlen
+        self.use_port_context = bool(getattr(config, "use_port_context", False))
+        self.port_context_size = int(getattr(config, "port_context_size", 0))
 
         self.register_buffer(
             "att_sizes",
             torch.tensor(
-                [self.lat_size, self.lon_size, self.sog_size, self.cog_size, self.heading_size],
+                [self.lat_size, self.lon_size, self.sog_size, self.cog_size],
                 dtype=torch.float32,
             ),
         )
@@ -42,17 +43,18 @@ class TrAISformerInterpolation(nn.Module):
             self.lon_size,
             self.sog_size,
             self.cog_size,
-            self.heading_size,
         )
 
         self.lat_emb = nn.Embedding(self.lat_size + 1, config.n_lat_embd)
         self.lon_emb = nn.Embedding(self.lon_size + 1, config.n_lon_embd)
         self.sog_emb = nn.Embedding(self.sog_size + 1, config.n_sog_embd)
         self.cog_emb = nn.Embedding(self.cog_size + 1, config.n_cog_embd)
-        self.heading_emb = nn.Embedding(self.heading_size + 1, config.n_heading_embd)
         self.segment_emb = nn.Embedding(4, config.n_embd)
         self.pos_emb = nn.Parameter(torch.zeros(1, config.max_seqlen, config.n_embd))
         self.drop = nn.Dropout(config.embd_pdrop)
+        self.port_proj = None
+        if self.use_port_context and self.port_context_size > 0:
+            self.port_proj = nn.Linear(self.port_context_size, config.n_embd, bias=False)
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=config.n_embd,
@@ -116,14 +118,26 @@ class TrAISformerInterpolation(nn.Module):
 
         return inputs
 
+    def _masked_port_context(self, port_context, token_types):
+        observed_positions = (token_types == self.PAST_SEGMENT_ID) | (
+            token_types == self.FUTURE_SEGMENT_ID
+        )
+        return port_context * observed_positions.unsqueeze(-1).to(port_context.dtype)
+
     def forward(
         self,
         x,
         token_types,
         valid_mask=None,
         target_mask=None,
+        port_context=None,
         with_targets=False,
     ):
+        if x.size(-1) != len(self.mask_token_ids):
+            raise ValueError(
+                f"Expected interpolation inputs with {len(self.mask_token_ids)} features, got {x.size(-1)}."
+            )
+
         idxs = self.to_indexes(x)
         inputs = self._masked_inputs(idxs, token_types)
 
@@ -131,9 +145,8 @@ class TrAISformerInterpolation(nn.Module):
         lon_embeddings = self.lon_emb(inputs[:, :, 1])
         sog_embeddings = self.sog_emb(inputs[:, :, 2])
         cog_embeddings = self.cog_emb(inputs[:, :, 3])
-        heading_embeddings = self.heading_emb(inputs[:, :, 4])
         token_embeddings = torch.cat(
-            (lat_embeddings, lon_embeddings, sog_embeddings, cog_embeddings, heading_embeddings),
+            (lat_embeddings, lon_embeddings, sog_embeddings, cog_embeddings),
             dim=-1,
         )
 
@@ -142,6 +155,13 @@ class TrAISformerInterpolation(nn.Module):
             raise ValueError("Input sequence is longer than max_seqlen.")
 
         hidden = token_embeddings + self.pos_emb[:, :seqlen, :] + self.segment_emb(token_types)
+        if port_context is not None and self.port_proj is not None:
+            if port_context.size(-1) != self.port_context_size:
+                raise ValueError(
+                    f"Expected port_context with last dimension {self.port_context_size}, got {port_context.size(-1)}."
+                )
+            hidden = hidden + self.port_proj(self._masked_port_context(port_context, token_types))
+
         hidden = self.drop(hidden)
         padding_mask = None if valid_mask is None else ~valid_mask.bool()
         hidden = self.encoder(hidden, src_key_padding_mask=padding_mask)
@@ -150,9 +170,9 @@ class TrAISformerInterpolation(nn.Module):
 
         loss = None
         if with_targets:
-            lat_logits, lon_logits, sog_logits, cog_logits, heading_logits = torch.split(
+            lat_logits, lon_logits, sog_logits, cog_logits = torch.split(
                 logits,
-                (self.lat_size, self.lon_size, self.sog_size, self.cog_size, self.heading_size),
+                (self.lat_size, self.lon_size, self.sog_size, self.cog_size),
                 dim=-1,
             )
 
@@ -176,13 +196,8 @@ class TrAISformerInterpolation(nn.Module):
                 idxs[:, :, 3].reshape(-1),
                 reduction="none",
             ).view(batchsize, seqlen)
-            heading_loss = F.cross_entropy(
-                heading_logits.reshape(-1, self.heading_size),
-                idxs[:, :, 4].reshape(-1),
-                reduction="none",
-            ).view(batchsize, seqlen)
 
-            loss = lat_loss + lon_loss + sog_loss + cog_loss + heading_loss
+            loss = lat_loss + lon_loss + sog_loss + cog_loss
             if target_mask is not None:
                 denom = target_mask.sum(dim=1).clamp_min(1.0)
                 loss = (loss * target_mask).sum(dim=1) / denom

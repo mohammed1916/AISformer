@@ -78,20 +78,32 @@ def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
     dummy_input = torch.zeros((1, seq_len, 4), dtype=torch.float32, device=device)
     # token_types: integer segment ids per position (shape: [batch, seq_len])
     dummy_token_types = torch.zeros((1, seq_len), dtype=torch.long, device=device)
+    export_args = [dummy_input, dummy_token_types]
+    input_names = ["x", "token_types"]
+    dynamic_axes = {
+        "x": {0: "batch", 1: "seq_len"},
+        "token_types": {0: "batch", 1: "seq_len"},
+        "logits": {0: "batch", 1: "seq_len"},
+    }
+    if getattr(cf, "use_port_context", False):
+        dummy_port_context = torch.zeros(
+            (1, seq_len, int(getattr(cf, "port_context_size", 0))),
+            dtype=torch.float32,
+            device=device,
+        )
+        export_args.append(dummy_port_context)
+        input_names.append("port_context")
+        dynamic_axes["port_context"] = {0: "batch", 1: "seq_len"}
 
     print(f"Exporting ONNX model to {onnx_path} (seq_len={seq_len})...")
     torch.onnx.export(
         model,
-        (dummy_input, dummy_token_types),
+        tuple(export_args),
         onnx_path,
         opset_version=18,
-        input_names=["x", "token_types"],
+        input_names=input_names,
         output_names=["logits"],
-        dynamic_axes={
-            "x": {0: "batch", 1: "seq_len"},
-            "token_types": {0: "batch", 1: "seq_len"},
-            "logits": {0: "batch", 1: "seq_len"},
-        },
+        dynamic_axes=dynamic_axes,
         do_constant_folding=True,
         verbose=False,
     )
@@ -122,6 +134,11 @@ def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
         "east_km_min": getattr(cf, "east_km_min", None),
         "east_km_max": getattr(cf, "east_km_max", None),
         "local_origin_mode": getattr(cf, "local_origin_mode", "last_past_point"),
+        "use_port_context": bool(getattr(cf, "use_port_context", False)),
+        "port_context_size": int(getattr(cf, "port_context_size", 0)),
+        "port_nearest_k": int(getattr(cf, "port_nearest_k", 0)),
+        "port_max_distance_km": float(getattr(cf, "port_max_distance_km", 0.0)),
+        "port_distance_scale_km": float(getattr(cf, "port_distance_scale_km", 0.0)),
     }
     with open(config_out, "w", encoding="utf-8") as f:
         json.dump(export_config, f, indent=2)
