@@ -25,7 +25,7 @@ def main():
     trials_path = os.path.abspath(args.trials_file)
     if not os.path.exists(trials_path):
         print(f"Trials file not found: {trials_path}")
-        return 2
+        return 80
 
     with open(trials_path, "r", encoding="utf-8") as f:
         trials = json.load(f)

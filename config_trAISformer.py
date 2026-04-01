@@ -105,7 +105,7 @@ class Config():
     lr_decay = True
     warmup_tokens = 512*20 # these two numbers come from the GPT-3 paper, but may not be good defaults elsewhere
     final_tokens = 260e9 # (at what point we reach 10% of original LR)
-    num_workers = 4 # for DataLoader
+    num_workers = 0 # for DataLoader (set to 0 to avoid multiprocessing pickling error on Windows)
     
     filename = f"{dataset_name}"\
         + f"-{mode}-{sample_mode}-{top_k}-{r_vicinity}"\
