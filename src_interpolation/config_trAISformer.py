@@ -103,10 +103,13 @@ class Config:
     betas = (0.9, 0.95)
     grad_norm_clip = 1.0
     weight_decay = 0.01
-    lr_decay = False
+    lr_decay = True
     warmup_tokens = 512 * 20
     final_tokens = 260e9
     num_workers = 0  # 0 avoids multiprocessing pickling errors on Windows
+
+    early_stop_patience = 10
+    min_improvement = 1e-4
 
     # ── RTX 4060 Ada Lovelace optimizations ───────────────────────────────────
     # BF16 Tensor Cores: native speed on sm_89, no gradient scaling needed

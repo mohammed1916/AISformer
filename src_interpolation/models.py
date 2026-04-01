@@ -125,11 +125,13 @@ class TrAISformerInterpolation(nn.Module):
 
         return inputs
 
-    def _masked_port_context(self, port_context, token_types):
+    def _masked_context(self, context, token_types):
+        if context is None:
+            return None
         observed_positions = (token_types == self.PAST_SEGMENT_ID) | (
             token_types == self.FUTURE_SEGMENT_ID
         )
-        return port_context * observed_positions.unsqueeze(-1).to(port_context.dtype)
+        return context * observed_positions.unsqueeze(-1).to(context.dtype)
 
     def forward(
         self,
@@ -168,13 +170,13 @@ class TrAISformerInterpolation(nn.Module):
                 raise ValueError(
                     f"Expected port_context with last dimension {self.port_context_size}, got {port_context.size(-1)}."
                 )
-            hidden = hidden + self.port_proj(self._masked_port_context(port_context, token_types))
+            hidden = hidden + self.port_proj(self._masked_context(port_context, token_types))
         if land_context is not None and self.land_proj is not None:
             if land_context.size(-1) != self.land_context_size:
                 raise ValueError(
                     f"Expected land_context with last dimension {self.land_context_size}, got {land_context.size(-1)}."
                 )
-            hidden = hidden + self.land_proj(self._masked_port_context(land_context, token_types))
+            hidden = hidden + self.land_proj(self._masked_context(land_context, token_types))
 
         hidden = self.drop(hidden)
         padding_mask = None if valid_mask is None else ~valid_mask.bool()

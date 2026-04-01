@@ -274,22 +274,44 @@ class Trainer:
 
         best_loss = float("inf")
         best_epoch = 0
+        no_improve_epochs = 0
         self.tokens = 0
 
         for epoch in range(config.max_epochs):
-            run_epoch("Training", epoch=epoch)
+            train_loss = run_epoch("Training", epoch=epoch)
             valid_loss = run_epoch("Valid", epoch=epoch) if self.valid_dataset is not None else None
 
-            good_model = self.valid_dataset is None or valid_loss < best_loss
+            logging.info(
+                "Epoch %d summary: train_loss=%.5f valid_loss=%s",
+                epoch + 1,
+                train_loss,
+                f"{valid_loss:.5f}" if valid_loss is not None else "N/A",
+            )
+
+            good_model = self.valid_dataset is None or (valid_loss is not None and valid_loss < best_loss - config.min_improvement)
             if self.config.ckpt_path is not None and good_model:
                 best_loss = valid_loss if valid_loss is not None else best_loss
                 best_epoch = epoch
+                no_improve_epochs = 0
                 self.save_checkpoint(best_epoch + 1)
+            else:
+                if self.valid_dataset is not None:
+                    no_improve_epochs += 1
 
             self._plot_predictions(epoch)
 
+            if self.valid_dataset is not None and no_improve_epochs >= getattr(config, "early_stop_patience", 10):
+                logging.info(
+                    "Early stopping after %d epochs without improvement (best epoch=%d, best loss=%.5f).",
+                    no_improve_epochs,
+                    best_epoch + 1,
+                    best_loss,
+                )
+                break
+
         raw_model = self.model.module if hasattr(self.model, "module") else self.model
         _orig = raw_model._orig_mod if hasattr(raw_model, "_orig_mod") else raw_model
-        logging.info(f"Last epoch: {epoch + 1:03d}, saving model to {self.config.ckpt_path}")
-        save_path = self.config.ckpt_path.replace("model.pt", f"model_{epoch + 1:03d}.pt")
+        final_epoch = epoch + 1
+        logging.info(f"Last epoch: {final_epoch:03d}, saving model to {self.config.ckpt_path}")
+        save_path = self.config.ckpt_path.replace("model.pt", f"model_{final_epoch:03d}.pt")
         torch.save(_orig.state_dict(), save_path)
