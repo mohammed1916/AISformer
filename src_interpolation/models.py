@@ -68,11 +68,13 @@ class TrAISformerInterpolation(nn.Module):
             dropout=config.resid_pdrop,
             activation="gelu",
             batch_first=True,
+            norm_first=True,  # Pre-LN: faster, more stable; required for Flash Attn path
         )
         self.encoder = nn.TransformerEncoder(
             encoder_layer,
             num_layers=config.n_layer,
-            enable_nested_tensor=False,
+            enable_nested_tensor=True,   # enables Flash Attention kernel via SDPA
+            mask_check=False,            # skip mask shape assert; we manage it ourselves
         )
         self.ln_f = nn.LayerNorm(config.n_embd)
         self.head = nn.Linear(config.n_embd, self.full_size, bias=False)

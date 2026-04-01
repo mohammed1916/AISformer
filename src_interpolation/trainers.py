@@ -92,8 +92,19 @@ class Trainer:
         self.model = model.to(device)
         self.aisdls = aisdls or {}
 
+        # AMP: use BF16 on CUDA (Ada Lovelace sm_89 has native BF16 Tensor Cores)
+        # GradScaler is for FP16 only; BF16 has FP32-level dynamic range, no scaling needed
+        self._amp_enabled = torch.cuda.is_available() and getattr(config, "use_amp", True)
+        self._amp_dtype = torch.bfloat16 if getattr(config, "amp_dtype", "bfloat16") == "bfloat16" else torch.float16
+        self._scaler = torch.amp.GradScaler("cuda", enabled=(self._amp_enabled and self._amp_dtype == torch.float16))
+        if self._amp_enabled:
+            logging.info("AMP enabled: dtype=%s", self._amp_dtype)
+
     def save_checkpoint(self, best_epoch):
         raw_model = self.model.module if hasattr(self.model, "module") else self.model
+        # Unwrap compiled model if needed
+        if hasattr(raw_model, "_orig_mod"):
+            raw_model = raw_model._orig_mod
         logging.info(f"Best epoch: {best_epoch:03d}, saving model to {self.config.ckpt_path}")
         torch.save(raw_model.state_dict(), self.config.ckpt_path)
 
@@ -117,11 +128,11 @@ class Trainer:
             land_features,
         ) = next(iter(self.aisdls["test"]))
         n_plots = min(6, seqs.shape[0])
-        seqs = seqs[:n_plots].to(self.device)
-        token_types = token_types[:n_plots].to(self.device)
-        valid_masks = valid_masks[:n_plots].to(self.device)
-        port_features = port_features[:n_plots].to(self.device)
-        land_features = land_features[:n_plots].to(self.device)
+        seqs = seqs[:n_plots].to(self.device, non_blocking=True)
+        token_types = token_types[:n_plots].to(self.device, non_blocking=True)
+        valid_masks = valid_masks[:n_plots].to(self.device, non_blocking=True)
+        port_features = port_features[:n_plots].to(self.device, non_blocking=True)
+        land_features = land_features[:n_plots].to(self.device, non_blocking=True)
 
         preds = predict_gap(
             raw_model,
@@ -143,13 +154,15 @@ class Trainer:
         plt.figure(figsize=(9, 6), dpi=150)
         cmap = plt.cm.get_cmap("tab10")
 
+        # Resolve segment IDs from underlying model (may be torch.compile wrapped)
+        _m = raw_model._orig_mod if hasattr(raw_model, "_orig_mod") else raw_model
         for idx in range(n_plots):
             c = cmap(float(idx) / max(1, n_plots - 1))
             tt = token_types_np[idx]
 
-            past_mask = tt == raw_model.PAST_SEGMENT_ID
-            gap_mask = tt == raw_model.GAP_SEGMENT_ID
-            future_mask = tt == raw_model.FUTURE_SEGMENT_ID
+            past_mask = tt == _m.PAST_SEGMENT_ID
+            gap_mask = tt == _m.GAP_SEGMENT_ID
+            future_mask = tt == _m.FUTURE_SEGMENT_ID
 
             plt.plot(inputs_np[idx][past_mask, 1], inputs_np[idx][past_mask, 0], "-o", color=c, linewidth=1.5, markersize=3)
             plt.plot(inputs_np[idx][future_mask, 1], inputs_np[idx][future_mask, 0], "-o", color=c, linewidth=1.5, markersize=3)
@@ -165,7 +178,12 @@ class Trainer:
     def train(self):
         model, config = self.model, self.config
         raw_model = model.module if hasattr(self.model, "module") else model
-        optimizer = raw_model.configure_optimizers(config)
+        _orig = raw_model._orig_mod if hasattr(raw_model, "_orig_mod") else raw_model
+        optimizer = _orig.configure_optimizers(config)
+
+        # pin_memory=True works with num_workers=0 in PyTorch 2.x and allows
+        # non_blocking=True GPU transfers to overlap with CPU work
+        use_pin = torch.cuda.is_available()
 
         def run_epoch(split, epoch=0):
             is_train = split == "Training"
@@ -174,7 +192,7 @@ class Trainer:
             loader = DataLoader(
                 data,
                 shuffle=is_train,
-                pin_memory=True,
+                pin_memory=use_pin,
                 batch_size=config.batch_size,
                 num_workers=config.num_workers,
             )
@@ -198,14 +216,18 @@ class Trainer:
                     port_features,
                     land_features,
                 ) = batch
-                seqs = seqs.to(self.device)
-                token_types = token_types.to(self.device)
-                valid_masks = valid_masks.to(self.device)
-                target_masks = target_masks.to(self.device)
-                port_features = port_features.to(self.device)
-                land_features = land_features.to(self.device)
+                # non_blocking=True: overlaps H2D DMA with CPU preprocessing
+                seqs = seqs.to(self.device, non_blocking=True)
+                token_types = token_types.to(self.device, non_blocking=True)
+                valid_masks = valid_masks.to(self.device, non_blocking=True)
+                target_masks = target_masks.to(self.device, non_blocking=True)
+                port_features = port_features.to(self.device, non_blocking=True)
+                land_features = land_features.to(self.device, non_blocking=True)
 
-                with torch.set_grad_enabled(is_train):
+                # BF16 autocast: Tensor Cores on sm_89 run BF16 at native speed.
+                # Forward + loss are cast; backward is kept in FP32 (PyTorch handles this).
+                amp_ctx = torch.autocast(device_type="cuda", dtype=self._amp_dtype, enabled=self._amp_enabled)
+                with torch.set_grad_enabled(is_train), amp_ctx:
                     _, loss = model(
                         seqs,
                         token_types=token_types,
@@ -216,16 +238,18 @@ class Trainer:
                         with_targets=True,
                     )
                     loss = loss.mean()
-                    losses.append(loss.item())
 
+                losses.append(loss.item())
                 running_loss += loss.item() * seqs.shape[0]
                 n_items += seqs.shape[0]
 
                 if is_train:
                     model.zero_grad(set_to_none=True)
-                    loss.backward()
+                    self._scaler.scale(loss).backward()
+                    self._scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_norm_clip)
-                    optimizer.step()
+                    self._scaler.step(optimizer)
+                    self._scaler.update()
 
                     if config.lr_decay:
                         self.tokens += target_masks.sum().item()
@@ -265,6 +289,7 @@ class Trainer:
             self._plot_predictions(epoch)
 
         raw_model = self.model.module if hasattr(self.model, "module") else self.model
+        _orig = raw_model._orig_mod if hasattr(raw_model, "_orig_mod") else raw_model
         logging.info(f"Last epoch: {epoch + 1:03d}, saving model to {self.config.ckpt_path}")
         save_path = self.config.ckpt_path.replace("model.pt", f"model_{epoch + 1:03d}.pt")
-        torch.save(raw_model.state_dict(), save_path)
+        torch.save(_orig.state_dict(), save_path)

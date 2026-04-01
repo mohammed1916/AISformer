@@ -26,6 +26,13 @@ cf = Config()
 utils.set_seed(cf.seed)
 torch.pi = torch.acos(torch.zeros(1)).item() * 2
 
+# ── Ada Lovelace / CUDA global optimizations ──────────────────────────────────
+# TF32 uses 10-bit mantissa on Tensor Cores: ~3× faster matmuls, negligible loss
+torch.backends.cuda.matmul.allow_tf32 = True
+torch.backends.cudnn.allow_tf32 = True
+# Let cuDNN auto-select fastest conv kernels for fixed input shapes
+torch.backends.cudnn.benchmark = True
+
 
 def load_phase_data(filename):
     datapath = os.path.join(cf.datadir, filename)
@@ -252,6 +259,12 @@ if __name__ == "__main__":
     data, aisdatasets, aisdls = build_datasets()
 
     model = models.TrAISformerInterpolation(cf)
+
+    # torch.compile: fuses ops into Triton/CUDA kernels (sm_89 Ada Lovelace)
+    # reduce-overhead uses CUDA graphs to eliminate per-iter Python launch overhead
+    if getattr(cf, "use_compile", True) and torch.cuda.is_available():
+        logging.info("Compiling model with torch.compile(mode='reduce-overhead')...")
+        model = torch.compile(model, mode="reduce-overhead")
 
     trainer = trainers.Trainer(
         model,

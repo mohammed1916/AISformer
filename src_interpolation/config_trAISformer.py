@@ -12,7 +12,7 @@ class Config:
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     max_epochs = 50
-    batch_size = 32
+    batch_size = 128  # overridden below; kept here so filename template has it early
     n_samples = 4
     seed = 42
 
@@ -107,6 +107,15 @@ class Config:
     warmup_tokens = 512 * 20
     final_tokens = 260e9
     num_workers = 0  # 0 avoids multiprocessing pickling errors on Windows
+
+    # ── RTX 4060 Ada Lovelace optimizations ───────────────────────────────────
+    # BF16 Tensor Cores: native speed on sm_89, no gradient scaling needed
+    use_amp = True
+    amp_dtype = "bfloat16"
+    # torch.compile: fuses kernels; disable if you hit a Triton/Windows issue
+    use_compile = True
+    # Larger batch saturates 24 SMs; BF16 halves memory so 128 fits in 8 GB VRAM
+    batch_size = 128
 
     filename = (
         f"{dataset_name}"

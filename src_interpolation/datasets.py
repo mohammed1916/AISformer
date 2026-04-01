@@ -101,6 +101,20 @@ class AISInterpolationDataset(Dataset):
             for sample_idx in range(self.samples_per_track)
         ]
 
+        # Pre-compute port/land context once per track to avoid per-sample recomputation.
+        if config is not None and (self.port_encoder is not None or self.land_encoder is not None):
+            logger.info("Pre-computing port/land context for %d tracks...", len(self.l_data))
+            for vessel in self.l_data:
+                traj = np.clip(vessel["traj"][:, :4], 0.0, 0.9999)
+                real_lats, real_lons = position_utils.source_positions_to_real_np(
+                    traj[:, 0], traj[:, 1], config
+                )
+                if self.port_encoder is not None:
+                    vessel["_port_features"] = self.port_encoder.encode_positions(real_lats, real_lons)
+                if self.land_encoder is not None:
+                    vessel["_land_features"] = self.land_encoder.encode_positions(real_lats, real_lons)
+            logger.info("Pre-computation complete.")
+
     def __len__(self):
         return len(self.sample_refs)
 
@@ -176,24 +190,16 @@ class AISInterpolationDataset(Dataset):
 
         port_features = np.zeros((self.max_seqlen, self.port_context_size), dtype=np.float32)
         land_features = np.zeros((self.max_seqlen, self.land_context_size), dtype=np.float32)
-        if (self.port_encoder is not None or self.land_encoder is not None) and total_len > 0:
-            real_lats, real_lons = position_utils.source_positions_to_real_np(
-                window[:, 0],
-                window[:, 1],
-                self.config,
-            )
-            if self.port_encoder is not None:
-                port_features[:total_len] = self.port_encoder.encode_positions(
-                    real_lats,
-                    real_lons,
-                    token_types=token_types[:total_len],
-                )
-            if self.land_encoder is not None:
-                land_features[:total_len] = self.land_encoder.encode_positions(
-                    real_lats,
-                    real_lons,
-                    token_types=token_types[:total_len],
-                )
+        if total_len > 0:
+            gap_mask = (token_types[:total_len] == 2)  # GAP tokens should have zero context
+            if self.port_encoder is not None and "_port_features" in vessel:
+                sliced = vessel["_port_features"][start_idx:start_idx + total_len].copy()
+                sliced[gap_mask] = 0.0
+                port_features[:total_len] = sliced
+            if self.land_encoder is not None and "_land_features" in vessel:
+                sliced = vessel["_land_features"][start_idx:start_idx + total_len].copy()
+                sliced[gap_mask] = 0.0
+                land_features[:total_len] = sliced
 
         return (
             torch.tensor(seq, dtype=torch.float32),
