@@ -29,7 +29,7 @@ class Config:
     edge_case_prob = 0.20
 
     # Log sampled past/gap/future lengths once when building loaders (see datasets.log_gap_sampling_stats).
-    log_gap_sampling = True
+    log_gap_sampling = False
     log_gap_sample_budget = 8192
 
     train_samples_per_track = 4
@@ -106,7 +106,7 @@ class Config:
     lr_decay = False
     warmup_tokens = 512 * 20
     final_tokens = 260e9
-    num_workers = 4
+    num_workers = 0  # 0 avoids multiprocessing pickling errors on Windows
 
     filename = (
         f"{dataset_name}"
