@@ -7,7 +7,7 @@ import torch
 
 
 class Config:
-    retrain = True
+    retrain = False
     tb_log = False
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -20,12 +20,12 @@ class Config:
     min_seqlen = 36
 
     # Curriculum: start narrow; widen max_gap_points (and past/future caps) after loss moves.
-    min_past_points = 1
-    max_past_points = 10
-    min_future_points = 1
-    max_future_points = 10
-    min_gap_points = 1
-    max_gap_points = 6
+    min_past_points = 5
+    max_past_points = 40
+    min_future_points = 5
+    max_future_points = 40
+    min_gap_points = 10
+    max_gap_points = 30
     edge_case_prob = 0.20
 
     # Log sampled past/gap/future lengths once when building loaders (see datasets.log_gap_sampling_stats).
