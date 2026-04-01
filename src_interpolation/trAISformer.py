@@ -293,13 +293,26 @@ if __name__ == "__main__":
         aisdls=aisdls,
     )
 
+    def save_interrupted_model(model, config):
+        raw_model = model.module if hasattr(model, "module") else model
+        if hasattr(raw_model, "_orig_mod"):
+            raw_model = raw_model._orig_mod
+        save_path = os.path.join(config.savedir, "model_interrupt.pt")
+        torch.save(raw_model.state_dict(), save_path)
+        logging.info("Keyboard interrupt: model saved to %s", save_path)
+
     if args.eval_only:
         model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
         model = model.to(cf.device)
         evaluate(model, aisdls)
     else:
         if cf.retrain or not os.path.exists(cf.ckpt_path):
-            trainer.train()
+            try:
+                trainer.train()
+            except KeyboardInterrupt:
+                logging.warning("Training interrupted by user. Saving current model (interrupt checkpoint).")
+                save_interrupted_model(model, cf)
+                raise
 
         model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
         model = model.to(cf.device)
