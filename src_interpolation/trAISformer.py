@@ -263,8 +263,25 @@ if __name__ == "__main__":
     # torch.compile: fuses ops into Triton/CUDA kernels (sm_89 Ada Lovelace)
     # reduce-overhead uses CUDA graphs to eliminate per-iter Python launch overhead
     if getattr(cf, "use_compile", True) and torch.cuda.is_available():
-        logging.info("Compiling model with torch.compile(mode='reduce-overhead')...")
-        model = torch.compile(model, mode="reduce-overhead")
+        try:
+            import triton  # type: ignore
+            has_triton = True
+        except Exception:
+            has_triton = False
+
+        if has_triton:
+            try:
+                logging.info("Compiling model with torch.compile(mode='reduce-overhead')...")
+                model = torch.compile(model, mode="reduce-overhead")
+            except Exception as e:
+                logging.warning(
+                    "torch.compile failed (%s); continuing without compilation.",
+                    repr(e),
+                )
+        else:
+            logging.warning(
+                "Triton is not available; skipping torch.compile and using uncompiled model."
+            )
 
     trainer = trainers.Trainer(
         model,

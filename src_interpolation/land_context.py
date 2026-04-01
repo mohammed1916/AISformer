@@ -66,20 +66,37 @@ class LandContextEncoder:
         else:
             self.land_mask = None
             self.land_mask_gpu = None
-        # For GPU: sample coastline as dense array of points
-        if self.use_gpu and not self.coastline.is_empty:
+        # Sample coastline as dense array of points for vectorized distance computations.
+        self.coastline_points = None
+        self.coastline_array = None
+        if not self.coastline.is_empty:
             try:
-                import cupy as cp
+                n_samples = 1000
                 if hasattr(self.coastline, 'interpolate'):
-                    n_samples = 1000
-                    coast_points = [self.coastline.interpolate(float(i)/n_samples, normalized=True) for i in range(n_samples)]
-                    self.coastline_array = cp.asarray([[pt.y, pt.x] for pt in coast_points], dtype=cp.float32)
+                    coast_points = [
+                        self.coastline.interpolate(float(i) / n_samples, normalized=True)
+                        for i in range(n_samples)
+                    ]
+                    coast_np = np.asarray([[pt.y, pt.x] for pt in coast_points], dtype=np.float32)
                 else:
+                    # Fallback: extract coordinates from linestring/multilinestring directly.
+                    coords = np.asarray(self.coastline.coords, dtype=np.float32)
+                    coast_np = coords[:, ::-1] if coords.shape[1] >= 2 else None
+                if coast_np is not None and coast_np.size > 0:
+                    self.coastline_points = coast_np
+                    if self.use_gpu:
+                        try:
+                            import cupy as cp
+                            self.coastline_array = cp.asarray(coast_np, dtype=cp.float32)
+                        except ImportError:
+                            self.coastline_array = None
+                else:
+                    self.coastline_points = None
                     self.coastline_array = None
-            except ImportError:
+            except Exception:
+                self.coastline_points = None
                 self.coastline_array = None
-        else:
-            self.coastline_array = None
+
         self._encode_cached = lru_cache(maxsize=max(1, int(cache_size)))(
             self._encode_single_uncached
         )
@@ -123,6 +140,9 @@ class LandContextEncoder:
             except ImportError:
                 print("CuPy not available, falling back to CPU/NumPy.")
 
+        if not self.use_gpu and self.coastline_points is not None:
+            return self._encode_positions_numpy(lats, lons, observed_mask)
+
         for idx in np.flatnonzero(observed_mask):
             lat_key = round(float(lats[idx]), self.cache_round_decimals)
             lon_key = round(float(lons[idx]), self.cache_round_decimals)
@@ -162,6 +182,48 @@ class LandContextEncoder:
         features[:, 1] = np.clip(north_km.get() / self.distance_scale_km, -1.0, 1.0)
         features[:, 2] = np.clip(east_km.get() / self.distance_scale_km, -1.0, 1.0)
         features[:, 3] = np.clip(signed_distance / self.distance_scale_km, -1.0, 1.0)
+        out = np.zeros((lats.size, self.context_size), dtype=np.float32)
+        out[obs_idx] = features
+        return out
+
+    def _encode_positions_numpy(self, lats, lons, observed_mask):
+        obs_idx = np.flatnonzero(observed_mask)
+        if obs_idx.size == 0 or self.coastline_points is None:
+            return np.zeros((lats.size, self.context_size), dtype=np.float32)
+
+        # On-land check via raster mask (fast) if available.
+        lat_points = lats[obs_idx]
+        lon_points = lons[obs_idx]
+        if self.land_mask is not None:
+            lat_idx = np.clip(((lat_points - self.lat_min) / self.grid_res).astype(int), 0, self.land_mask.shape[0] - 1)
+            lon_idx = np.clip(((lon_points - self.lon_min) / self.grid_res).astype(int), 0, self.land_mask.shape[1] - 1)
+            on_land = self.land_mask[lat_idx, lon_idx].astype(np.float32)
+        else:
+            on_land = np.zeros(obs_idx.size, dtype=np.float32)
+
+        # Compute distances to pre-sampled coastline points (approximate).
+        coast = self.coastline_points  # (n_coast, 2)
+        dlat = lat_points[:, None] - coast[None, :, 0]
+        dlon = lon_points[:, None] - coast[None, :, 1]
+        dists = np.sqrt(dlat ** 2 + dlon ** 2)
+        min_idx = np.argmin(dists, axis=1)
+        min_dists = dists[np.arange(obs_idx.size), min_idx]
+        coast_closest = coast[min_idx]
+
+        north_km = (np.radians(coast_closest[:, 0] - lat_points) * EARTH_RADIUS_KM)
+        east_km = (
+            np.radians(coast_closest[:, 1] - lon_points)
+            * EARTH_RADIUS_KM
+            * np.maximum(np.cos(np.radians(lat_points)), _EPS)
+        )
+        signed_distance = np.where(on_land > 0.5, -min_dists, min_dists)
+
+        features = np.zeros((obs_idx.size, 4), dtype=np.float32)
+        features[:, 0] = on_land
+        features[:, 1] = np.clip(north_km / self.distance_scale_km, -1.0, 1.0)
+        features[:, 2] = np.clip(east_km / self.distance_scale_km, -1.0, 1.0)
+        features[:, 3] = np.clip(signed_distance / self.distance_scale_km, -1.0, 1.0)
+
         out = np.zeros((lats.size, self.context_size), dtype=np.float32)
         out[obs_idx] = features
         return out
