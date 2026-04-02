@@ -210,6 +210,7 @@ if __name__ == "__main__":
     parser.add_argument("--warmup-tokens", type=int, default=None)
     parser.add_argument("--n-samples", type=int, default=None)
     parser.add_argument("--retrain", type=lambda x: str(x).lower() in ["true", "1", "yes"], default=None)
+    parser.add_argument("--resume", type=lambda x: str(x).lower() in ["true", "1", "yes"], default=False)
     parser.add_argument("--eval-only", action="store_true")
     args = parser.parse_args()
 
@@ -306,7 +307,11 @@ if __name__ == "__main__":
         model = model.to(cf.device)
         evaluate(model, aisdls)
     else:
-        if cf.retrain or not os.path.exists(cf.ckpt_path):
+        if args.resume and os.path.exists(cf.ckpt_path):
+            model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
+            logging.info("Resuming training from checkpoint %s", cf.ckpt_path)
+
+        if args.resume or cf.retrain or not os.path.exists(cf.ckpt_path):
             try:
                 trainer.train()
             except KeyboardInterrupt:
