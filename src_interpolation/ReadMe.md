@@ -109,3 +109,19 @@ The computational cost of adding land and port context features depends on the n
 - The main cost is linear in the number of trajectory points and the number of ports/land polygons.
 - Using spatial indexing for land context is highly recommended for scalability.
 - For typical $k$ (nearest ports) and batch sizes, the cost is dominated by $P$ and $L$.
+
+# Profiling
+
+commit hash: eeac1e758d9bcb8c946b491a62da47bde723cfe5
+```
+TrAISformer  cmd /c "cd /d c:\Users\BBBS-AI-01\d\anomaly\TrAISformer && python scripts\profile_infer.py"
+C:\ProgramData\anaconda3\Lib\site-packages\torch\nn\modules\transformer.py:392: UserWarning: enable_nested_tensor is True, but self.use_nested_tensor is False because encoder_layer.norm_first was True
+  warnings.warn(
+device cuda:0
+model params 57424384
+case past=1 gap=1 future=1 -> avg=5.301 ms (total 265.053 ms over 50)
+case past=5 gap=5 future=5 -> avg=4.828 ms (total 241.402 ms over 50)
+case past=10 gap=10 future=10 -> avg=5.806 ms (total 290.282 ms over 50)
+case past=20 gap=20 future=20 -> avg=5.980 ms (total 298.989 ms over 50)
+case past=40 gap=40 future=40 -> avg=5.548 ms (total 277.387 ms over 50)
+```
