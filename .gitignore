@@ -132,3 +132,5 @@ dmypy.json
 # OS
 .DS_Store
 Thumbs.db
+model_interpolation_exported.onnx
+model_interpolation_exported.onnx.data
