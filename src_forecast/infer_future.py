@@ -11,7 +11,7 @@ import numpy as np
 import torch
 
 from src_forecast import datasets
-from src_interpolation import models
+from src_interpolation import models, trainers
 import src_interpolation.land_context as land_context
 import src_interpolation.port_context as port_context
 from src_forecast.config_trAISformer import Config
@@ -35,6 +35,7 @@ def parse_args():
         help="Whether the provided points are normalized [0,1) values or real-world values.",
     )
     parser.add_argument("--sample", action="store_true", help="Sample from the output distribution instead of argmax.")
+    parser.add_argument("--n-samples", type=int, default=1, help="Number of probable trajectories to generate.")
     parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature. Defaults to config.")
     parser.add_argument("--top-k", type=int, default=None, help="Optional top-k filtering for decoding.")
     parser.add_argument("--output-file", type=str, default=None, help="Optional file path to write JSON output.")
@@ -166,28 +167,40 @@ def main():
     port_features = port_features.to(config.device)
     land_features = land_features.to(config.device)
 
-    completed = trainers.predict_gap(
-        model,
-        seqs,
-        token_types,
-        valid_mask,
-        port_context=port_features,
-        land_context=land_features,
-        sample=args.sample,
-        temperature=args.temperature if args.temperature is not None else config.temperature,
-        top_k=args.top_k if args.top_k is not None else config.top_k,
-    )
+    if args.n_samples < 1:
+        raise ValueError("--n-samples must be at least 1.")
+    if args.n_samples > 1:
+        args.sample = True
 
-    predicted_future_norm = completed[0, len(prev_norm) : len(prev_norm) + args.future_len].detach().cpu().numpy()
-    predicted_future_real = denormalize_points(predicted_future_norm, config)
+    all_predicted_norm = []
+    all_predicted_real = []
+    for sample_idx in range(args.n_samples):
+        completed = trainers.predict_gap(
+            model,
+            seqs,
+            token_types,
+            valid_mask,
+            port_context=port_features,
+            land_context=land_features,
+            sample=args.sample,
+            temperature=args.temperature if args.temperature is not None else config.temperature,
+            top_k=args.top_k if args.top_k is not None else config.top_k,
+        )
+        predicted_future_norm = completed[0, len(prev_norm) : len(prev_norm) + args.future_len].detach().cpu().numpy()
+        predicted_future_real = denormalize_points(predicted_future_norm, config)
+        all_predicted_norm.append(predicted_future_norm.tolist())
+        all_predicted_real.append(predicted_future_real.tolist())
 
     result = {
         "checkpoint": str(checkpoint),
         "future_len": args.future_len,
         "input_space": args.input_space,
-        "predicted_future_normalized": predicted_future_norm.tolist(),
-        "predicted_future_real": predicted_future_real.tolist(),
+        "predicted_futures_normalized": all_predicted_norm,
+        "predicted_futures_real": all_predicted_real,
     }
+    if args.n_samples == 1:
+        result["predicted_future_normalized"] = all_predicted_norm[0]
+        result["predicted_future_real"] = all_predicted_real[0]
 
     output_text = json.dumps(result, indent=2)
     print(output_text)
