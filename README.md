@@ -42,6 +42,24 @@ For the port+land context checkpoint in `results_interpolation/ct_dma-pos-global
   - `<= 2.0 km`: `82.11%`
   - `<= 5.0 km`: `99.38%`
 
+### Larger-gap evaluation (10–30 point gap model)
+
+A separate model checkpoint was evaluated for larger interpolation gaps using the saved port+land context checkpoint at `results_interpolation/ct_dma-pos-global_roi-interp-gap-10-30-past-5-40-future-5-40-edge-0.2-samples-4-1-data_size-80-80-10-24-embd_size-128-128-64-64-port-1-3-120-land-1-80-head-4-4-bs-128-lr-0.0006-seqlen-120/model_010.pt`.
+
+The test set metrics for this larger-gap model are:
+
+- Total gap points: `14086`
+- Mean gap error: `1.643 km`
+- RMSE gap error: `2.670 km`
+- Median gap error: `1.423 km`
+- Threshold accuracy:
+  - `<= 0.5 km`: `7.78%`
+  - `<= 1.0 km`: `29.49%`
+  - `<= 2.0 km`: `72.97%`
+  - `<= 5.0 km`: `98.64%`
+
+This model was trained for gap lengths between 10 and 30 points; the evaluation set realized gap lengths from 10 to 15 points in this run.
+
 ## ONNX export and inference
 
 ### Exporting model to ONNX (interactive)
