@@ -29,10 +29,10 @@ def decode_logits(model, logits, sample=False, temperature=1.0, top_k=None):
 
     if top_k is not None:
         original_shape = lat_logits.shape
-        lat_logits = utils.top_k_logits(lat_logits.reshape(-1, model.lat_size), top_k).view(original_shape)
-        lon_logits = utils.top_k_logits(lon_logits.reshape(-1, model.lon_size), top_k).view(lon_logits.shape)
-        sog_logits = utils.top_k_logits(sog_logits.reshape(-1, model.sog_size), top_k).view(sog_logits.shape)
-        cog_logits = utils.top_k_logits(cog_logits.reshape(-1, model.cog_size), top_k).view(cog_logits.shape)
+        lat_logits = utils.top_k_logits(lat_logits.reshape(-1, model.lat_size), min(top_k, model.lat_size)).view(original_shape)
+        lon_logits = utils.top_k_logits(lon_logits.reshape(-1, model.lon_size), min(top_k, model.lon_size)).view(lon_logits.shape)
+        sog_logits = utils.top_k_logits(sog_logits.reshape(-1, model.sog_size), min(top_k, model.sog_size)).view(sog_logits.shape)
+        cog_logits = utils.top_k_logits(cog_logits.reshape(-1, model.cog_size), min(top_k, model.cog_size)).view(cog_logits.shape)
 
     lat_probs = F.softmax(lat_logits, dim=-1)
     lon_probs = F.softmax(lon_logits, dim=-1)
