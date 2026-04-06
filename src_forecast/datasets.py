@@ -144,6 +144,22 @@ class AISForecastDataset(Dataset):
         start_idx = int(rng.integers(0, track_len - total_len + 1))
         window = traj[start_idx : start_idx + total_len]
 
+        if self.config is not None and position_utils.uses_local_position_frame(self.config):
+            real_lats, real_lons = position_utils.source_positions_to_real_np(
+                window[:, 0], window[:, 1], self.config
+            )
+            origin_lat = float(real_lats[past_len - 1])
+            origin_lon = float(real_lons[past_len - 1])
+            lat_norm, lon_norm, _, _ = position_utils.real_positions_to_model_norm_np(
+                real_lats,
+                real_lons,
+                self.config,
+                origin_lat=origin_lat,
+                origin_lon=origin_lon,
+            )
+            window[:, 0] = lat_norm
+            window[:, 1] = lon_norm
+
         seq = np.zeros((self.max_seqlen, 4), dtype=np.float32)
         seq[:total_len] = window[:, :4]
 
@@ -199,6 +215,7 @@ def build_forecast_sequence(
     prev_real_points=None,
     port_context_size=None,
     land_context_size=None,
+    config=None,
 ):
     prev_seq = np.asarray(prev_seq, dtype=np.float32)
 
@@ -209,7 +226,20 @@ def build_forecast_sequence(
         )
 
     seq = np.zeros((max_seqlen, 4), dtype=np.float32)
-    seq[:len(prev_seq)] = np.clip(prev_seq, 0.0, 0.9999)
+    if config is not None and position_utils.uses_local_position_frame(config):
+        if prev_real_points is None:
+            raise ValueError("Real previous positions are required for local-frame forecast sequence building.")
+        prev_real_points = np.asarray(prev_real_points, dtype=np.float32)
+        lat_norm, lon_norm, _, _ = position_utils.real_positions_to_model_norm_np(
+            prev_real_points[:, 0],
+            prev_real_points[:, 1],
+            config,
+        )
+        seq[:len(prev_seq), 0] = lat_norm
+        seq[:len(prev_seq), 1] = lon_norm
+        seq[:len(prev_seq), 2:] = np.clip(prev_seq[:, 2:], 0.0, 0.9999)
+    else:
+        seq[:len(prev_seq)] = np.clip(prev_seq, 0.0, 0.9999)
 
     token_types = np.zeros(max_seqlen, dtype=np.int64)
     token_types[:len(prev_seq)] = 1

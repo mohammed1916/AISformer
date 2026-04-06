@@ -133,6 +133,7 @@ def main():
             prev_real_points=prev_real[:, :2],
             port_context_size=getattr(cfg, 'port_context_size', 0),
             land_context_size=getattr(cfg, 'land_context_size', 0),
+            config=cfg,
         )
 
         seqs = seqs.to(cfg.device)

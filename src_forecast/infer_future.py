@@ -13,6 +13,7 @@ import torch
 from src_forecast import datasets
 from src_interpolation import models, trainers
 import src_interpolation.land_context as land_context
+import src_interpolation.position_utils as position_utils
 import src_interpolation.port_context as port_context
 from src_forecast.config_trAISformer import Config
 
@@ -85,17 +86,35 @@ def to_real_points(points, config, input_space):
 def normalize_points(points, config):
     real = np.asarray(points, dtype=np.float32)
     normalized = np.empty_like(real, dtype=np.float32)
-    normalized[:, 0] = (real[:, 0] - config.lat_min) / (config.lat_max - config.lat_min)
-    normalized[:, 1] = (real[:, 1] - config.lon_min) / (config.lon_max - config.lon_min)
+    if position_utils.uses_local_position_frame(config):
+        lat_norm, lon_norm, _, _ = position_utils.real_positions_to_model_norm_np(
+            real[:, 0], real[:, 1], config
+        )
+        normalized[:, 0] = lat_norm
+        normalized[:, 1] = lon_norm
+    else:
+        normalized[:, 0] = (real[:, 0] - config.lat_min) / (config.lat_max - config.lat_min)
+        normalized[:, 1] = (real[:, 1] - config.lon_min) / (config.lon_max - config.lon_min)
     normalized[:, 2] = np.clip(real[:, 2] / config.sog_range, 0.0, 0.9999)
     normalized[:, 3] = np.clip((real[:, 3] % 360.0) / 360.0, 0.0, 0.9999)
     return normalized
 
 
-def denormalize_points(points, config):
+def denormalize_points(points, config, origin_lat=None, origin_lon=None):
     real = np.empty_like(points, dtype=np.float32)
-    real[:, 0] = points[:, 0] * (config.lat_max - config.lat_min) + config.lat_min
-    real[:, 1] = points[:, 1] * (config.lon_max - config.lon_min) + config.lon_min
+    if position_utils.uses_local_position_frame(config):
+        if origin_lat is None or origin_lon is None:
+            raise ValueError(
+                "Local-frame forecast denormalization requires origin_lat and origin_lon."
+            )
+        lat, lon = position_utils.model_norm_to_real_np(
+            points[:, 0], points[:, 1], config, origin_lat=origin_lat, origin_lon=origin_lon
+        )
+        real[:, 0] = lat
+        real[:, 1] = lon
+    else:
+        real[:, 0] = points[:, 0] * (config.lat_max - config.lat_min) + config.lat_min
+        real[:, 1] = points[:, 1] * (config.lon_max - config.lon_min) + config.lon_min
     real[:, 2] = points[:, 2] * config.sog_range
     real[:, 3] = points[:, 3] * 360.0
     return real
@@ -153,8 +172,7 @@ def main():
         land_encoder=land_encoder,
         prev_real_points=prev_real[:, :2],
         port_context_size=getattr(config, "port_context_size", 0),
-        land_context_size=getattr(config, "land_context_size", 0),
-    )
+        land_context_size=getattr(config, "land_context_size", 0),        config=config,    )
 
     checkpoint = find_checkpoint(config, args.checkpoint)
     model = models.TrAISformerInterpolation(config)
@@ -187,7 +205,17 @@ def main():
             top_k=args.top_k if args.top_k is not None else config.top_k,
         )
         predicted_future_norm = completed[0, len(prev_norm) : len(prev_norm) + args.future_len].detach().cpu().numpy()
-        predicted_future_real = denormalize_points(predicted_future_norm, config)
+        if position_utils.uses_local_position_frame(config):
+            origin_lat = float(prev_real[-1, 0])
+            origin_lon = float(prev_real[-1, 1])
+            predicted_future_real = denormalize_points(
+                predicted_future_norm,
+                config,
+                origin_lat=origin_lat,
+                origin_lon=origin_lon,
+            )
+        else:
+            predicted_future_real = denormalize_points(predicted_future_norm, config)
         all_predicted_norm.append(predicted_future_norm.tolist())
         all_predicted_real.append(predicted_future_real.tolist())
 
