@@ -16,6 +16,7 @@ if SRC_INTERP not in sys.path:
 
 from models import TrAISformerInterpolation
 from config_trAISformer import Config
+from checkpoint_configs import apply_checkpoint_config
 from pathlib import Path
 
 try:
@@ -63,6 +64,12 @@ def select_checkpoint(root_dir="."):
 
 def export_onnx(ckpt_path, onnx_path, seq_len, device="cpu"):
     cf = Config()
+    try:
+        apply_checkpoint_config(cf, ckpt_path)
+        print(f"Applied checkpoint preset config for {ckpt_path}")
+    except Exception as e:
+        print(f"Warning: no checkpoint preset applied: {e}")
+
     trained_max_seqlen = cf.max_seqlen
     if seq_len > trained_max_seqlen:
         raise ValueError(f"seq_len ({seq_len}) cannot exceed trained max_seqlen ({trained_max_seqlen})")
