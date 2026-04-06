@@ -243,6 +243,14 @@ if __name__ == "__main__":
 
     data, aisdatasets, aisdls = build_datasets()
     model = models.TrAISformerInterpolation(cf)
+
+    if args.resume:
+        if os.path.isfile(cf.ckpt_path):
+            print(f"Resuming training from checkpoint: {cf.ckpt_path}")
+            model.load_state_dict(torch.load(cf.ckpt_path, map_location=cf.device))
+        else:
+            print(f"Resume requested, but checkpoint not found at {cf.ckpt_path}. Starting from scratch.")
+
     trainer = trainers.Trainer(model, aisdatasets["train"], aisdatasets["valid"], cf, savedir=cf.savedir, device=cf.device, aisdls=aisdls)
 
     if args.eval_only:
