@@ -60,6 +60,28 @@ The test set metrics for this larger-gap model are:
 
 This model was trained for gap lengths between 10 and 30 points; the evaluation set realized gap lengths from 10 to 15 points in this run.
 
+## Forecast evaluation metrics
+
+A past-only forecast variant was trained from the same `ct_dma` data and evaluated on the held-out test set. The checkpoint is available at `results_forecast/ct_dma-pos-global_roi-forecast-past-5-40-future-5-40-edge-0.2-samples-4-1-data_size-80-80-10-24-embd_size-128-128-64-64-port-1-3-120-land-1-80-head-4-4-bs-128-lr-0.0006-seqlen-120/model.pt`.
+
+Training logged a best validation loss of `4.91768` at epoch `27`, with early stopping at epoch `37`.
+
+The held-out forecast evaluation metrics are:
+
+- Test tracks: `1460`
+- Overall mean future forecast error: `8.5323 km`
+- Per-step mean forecast error:
+  - step 1: `1.9605 km`
+  - step 2: `1.9088 km`
+  - step 3: `2.1072 km`
+  - step 4: `2.4336 km`
+  - step 5: `2.7510 km`
+  - step 6: `3.1880 km`
+  - step 7: `3.5873 km`
+  - step 8: `3.9930 km`
+  - step 9: `4.5512 km`
+  - step 10: `5.1709 km`
+
 ## ONNX export and inference
 
 ### Exporting model to ONNX (interactive)
