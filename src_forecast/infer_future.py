@@ -36,8 +36,8 @@ def parse_args():
     )
     parser.add_argument("--sample", action="store_true", help="Sample from the output distribution instead of argmax.")
     parser.add_argument("--n-samples", type=int, default=1, help="Number of probable trajectories to generate.")
-    parser.add_argument("--temperature", type=float, default=None, help="Sampling temperature. Defaults to config.")
-    parser.add_argument("--top-k", type=int, default=None, help="Optional top-k filtering for decoding.")
+    parser.add_argument("--temperature", type=float, default=0.7, help="Sampling temperature. Lower values reduce unlikely jumps.")
+    parser.add_argument("--top-k", type=int, default=10, help="Top-k filtering for decoding. Smaller values improve stability.")
     parser.add_argument("--output-file", type=str, default=None, help="Optional file path to write JSON output.")
     return parser.parse_args()
 

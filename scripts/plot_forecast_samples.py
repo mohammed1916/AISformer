@@ -12,6 +12,8 @@ import numpy as np
 import pickle
 import torch
 
+from utils import haversine
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -26,9 +28,69 @@ def parse_args():
     parser.add_argument('--n-tracks', type=int, default=3, help='Number of test tracks to visualize.')
     parser.add_argument('--n-samples', type=int, default=3, help='Number of sampled futures per track.')
     parser.add_argument('--forecast-len', type=int, default=10, help='Number of future points to generate.')
-    parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature for forecast trajectories.')
-    parser.add_argument('--top-k', type=int, default=20, help='Top-k filtering for sampling logits.')
+    parser.add_argument('--temperature', type=float, default=0.7, help='Sampling temperature for forecast trajectories.')
+    parser.add_argument('--top-k', type=int, default=10, help='Top-k filtering for sampling logits.')
+    parser.add_argument('--max-sample-attempts', type=int, default=5, help='Maximum resampling attempts for stable future paths.')
+    parser.add_argument('--reject-first-km', type=float, default=20.0, help='Reject samples with first-step distance above this km.')
+    parser.add_argument('--reject-step-km', type=float, default=20.0, help='Reject samples with a single step jump above this km.')
     return parser.parse_args()
+
+
+def sample_safe_future_paths(
+    model,
+    seqs,
+    token_types,
+    valid_mask,
+    port_features,
+    land_features,
+    cfg,
+    forecast_len,
+    n_samples,
+    temperature,
+    top_k,
+    max_attempts,
+    reject_first_km,
+    reject_step_km,
+):
+    samples = []
+    prev_real = infer_future.to_real_points(seqs[0, :10, :4].cpu().numpy(), cfg, 'normalized') if seqs.shape[1] >= 10 else None
+    prev_point = prev_real[-1:] if prev_real is not None else None
+    prev_rad = None
+    if prev_point is not None:
+        prev_rad = torch.tensor(prev_point, dtype=torch.float32) * torch.pi / 180.0
+
+    for sample_idx in range(n_samples):
+        accepted = None
+        best = None
+        best_score = float('inf')
+        for attempt in range(max_attempts):
+            completed = trainers.predict_gap(
+                model,
+                seqs,
+                token_types,
+                valid_mask,
+                port_context=port_features,
+                land_context=land_features,
+                sample=True,
+                temperature=temperature,
+                top_k=top_k,
+            )
+            future_norm = completed[0, len(prev_real) : len(prev_real) + forecast_len].detach().cpu().numpy()
+            future_real = infer_future.denormalize_points(future_norm, cfg)
+            future_rad = torch.tensor(future_real[:, :2], dtype=torch.float32) * torch.pi / 180.0
+            d_from_prev = haversine(prev_rad.unsqueeze(0), future_rad.unsqueeze(0)).squeeze(0).cpu().numpy()
+            d_steps = (haversine(future_rad[:-1].unsqueeze(0), future_rad[1:].unsqueeze(0)).squeeze(0).cpu().numpy() if future_rad.shape[0] > 1 else np.array([]))
+            first_dist = float(d_from_prev[0])
+            max_jump = float(np.max(d_steps)) if d_steps.size > 0 else 0.0
+            score = first_dist + max_jump
+            if first_dist <= reject_first_km and max_jump <= reject_step_km:
+                accepted = future_real
+                break
+            if score < best_score:
+                best_score = score
+                best = future_real
+        samples.append(accepted if accepted is not None else best)
+    return samples
 
 
 def main():
@@ -79,21 +141,22 @@ def main():
         port_features = port_features.to(cfg.device)
         land_features = land_features.to(cfg.device)
 
-        samples = []
-        for _ in range(args.n_samples):
-            completed = trainers.predict_gap(
-                model,
-                seqs,
-                token_types,
-                valid_mask,
-                port_context=port_features,
-                land_context=land_features,
-                sample=True,
-                temperature=args.temperature,
-                top_k=args.top_k,
-            )
-            future_norm = completed[0, len(prev_norm) : len(prev_norm) + args.forecast_len].detach().cpu().numpy()
-            samples.append(infer_future.denormalize_points(future_norm, cfg))
+        samples = sample_safe_future_paths(
+            model,
+            seqs,
+            token_types,
+            valid_mask,
+            port_features,
+            land_features,
+            cfg,
+            args.forecast_len,
+            args.n_samples,
+            args.temperature,
+            args.top_k,
+            args.max_sample_attempts,
+            args.reject_first_km,
+            args.reject_step_km,
+        )
 
         ax = axes[track_idx][0]
         ax.plot(prev_real[:, 1], prev_real[:, 0], '-k', marker='x', label='history')

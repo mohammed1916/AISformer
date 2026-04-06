@@ -26,8 +26,11 @@ def parse_args():
     parser.add_argument('--n-tracks', type=int, default=10, help='Number of test tracks to evaluate.')
     parser.add_argument('--n-samples', type=int, default=3, help='Number of sampled futures per track.')
     parser.add_argument('--forecast-len', type=int, default=10, help='Number of future points to generate.')
-    parser.add_argument('--temperature', type=float, default=1.0, help='Sampling temperature for generation.')
-    parser.add_argument('--top-k', type=int, default=20, help='Top-k filtering for decoding.')
+    parser.add_argument('--temperature', type=float, default=0.7, help='Sampling temperature for generation.')
+    parser.add_argument('--top-k', type=int, default=10, help='Top-k filtering for decoding.')
+    parser.add_argument('--max-sample-attempts', type=int, default=5, help='Maximum resampling attempts for stable future paths.')
+    parser.add_argument('--reject-first-km', type=float, default=20.0, help='Reject samples with first-step distance above this km.')
+    parser.add_argument('--reject-step-km', type=float, default=20.0, help='Reject samples with a single step jump above this km.')
     parser.add_argument('--far-threshold', type=float, default=20.0, help='Threshold in km for far-off forecast from last observed point.')
     parser.add_argument('--jump-threshold', type=float, default=15.0, help='Threshold in km for abrupt jumps between consecutive predicted points.')
     return parser.parse_args()
@@ -40,6 +43,55 @@ def latlon_to_radians(coords, cfg):
     coords[..., 1] = coords[..., 1] * (cfg.lon_max - cfg.lon_min) + cfg.lon_min
     coords = coords * torch.pi / 180.0
     return coords
+
+
+def sample_safe_future(
+    model,
+    seqs,
+    token_types,
+    valid_mask,
+    port_features,
+    land_features,
+    cfg,
+    forecast_len,
+    temperature,
+    top_k,
+    max_attempts,
+    reject_first_km,
+    reject_step_km,
+):
+    prev_real = infer_future.to_real_points(seqs[0, :10, :4].cpu().numpy(), cfg, 'normalized')
+    prev_point = prev_real[-1:]
+    prev_rad = torch.tensor(prev_point, dtype=torch.float32) * torch.pi / 180.0
+
+    best = None
+    best_score = float('inf')
+    for attempt in range(max_attempts):
+        completed = trainers.predict_gap(
+            model,
+            seqs,
+            token_types,
+            valid_mask,
+            port_context=port_features,
+            land_context=land_features,
+            sample=True,
+            temperature=temperature,
+            top_k=top_k,
+        )
+        future_norm = completed[0, 10:10 + forecast_len].detach().cpu().numpy()
+        future_real = infer_future.denormalize_points(future_norm, cfg)
+        future_rad = torch.tensor(future_real[:, :2], dtype=torch.float32) * torch.pi / 180.0
+        d_from_prev = haversine(prev_rad.unsqueeze(0), future_rad.unsqueeze(0)).squeeze(0).cpu().numpy()
+        d_steps = (haversine(future_rad[:-1].unsqueeze(0), future_rad[1:].unsqueeze(0)).squeeze(0).cpu().numpy() if future_rad.shape[0] > 1 else np.array([]))
+        first_dist = float(d_from_prev[0])
+        max_jump = float(np.max(d_steps)) if d_steps.size > 0 else 0.0
+        score = first_dist + max_jump
+        if first_dist <= reject_first_km and max_jump <= reject_step_km:
+            return future_real, first_dist, float(np.max(d_from_prev)), max_jump, float(np.mean(d_steps)) if d_steps.size > 0 else 0.0, attempt
+        if score < best_score:
+            best_score = score
+            best = (future_real, first_dist, float(np.max(d_from_prev)), max_jump, float(np.mean(d_steps)) if d_steps.size > 0 else 0.0, attempt)
+    return best
 
 
 def evaluate_track(track, cfg, model, args, track_index):
@@ -71,42 +123,27 @@ def evaluate_track(track, cfg, model, args, track_index):
     port_features = port_features.to(cfg.device)
     land_features = land_features.to(cfg.device)
 
-    prev_point = prev_real[-1:]
-    prev_rad = latlon_to_radians(prev_point, cfg)
-
     issues = []
     result_rows = []
 
     with torch.no_grad():
         for sample_idx in range(args.n_samples):
-            completed = trainers.predict_gap(
+            sampled = sample_safe_future(
                 model,
                 seqs,
                 token_types,
                 valid_mask,
-                port_context=port_features,
-                land_context=land_features,
-                sample=True,
-                temperature=args.temperature,
-                top_k=args.top_k,
+                port_features,
+                land_features,
+                cfg,
+                args.forecast_len,
+                args.temperature,
+                args.top_k,
+                args.max_sample_attempts,
+                args.reject_first_km,
+                args.reject_step_km,
             )
-            future_norm = completed[0, len(prev_norm) : len(prev_norm) + args.forecast_len].detach().cpu().numpy()
-            future_real = infer_future.denormalize_points(future_norm, cfg)
-            future_rad = latlon_to_radians(future_real[:, :2], cfg)
-            base = prev_rad.repeat(future_rad.shape[0], 1).unsqueeze(0)
-            future_rad_unsq = future_rad.unsqueeze(0)
-            d_from_prev = haversine(base, future_rad_unsq).squeeze(0).cpu().numpy()
-
-            d_steps = np.array([])
-            if future_rad.shape[0] > 1:
-                prev_steps = future_rad[:-1].unsqueeze(0)
-                next_steps = future_rad[1:].unsqueeze(0)
-                d_steps = haversine(prev_steps, next_steps).squeeze(0).cpu().numpy()
-
-            max_from_prev = float(np.max(d_from_prev))
-            first_from_prev = float(d_from_prev[0])
-            max_jump = float(np.max(d_steps)) if d_steps.size > 0 else 0.0
-            mean_jump = float(np.mean(d_steps)) if d_steps.size > 0 else 0.0
+            future_real, first_from_prev, max_from_prev, max_jump, mean_jump, attempts = sampled
 
             result_rows.append({
                 'track_idx': track_index,
@@ -115,6 +152,7 @@ def evaluate_track(track, cfg, model, args, track_index):
                 'max_from_prev_km': max_from_prev,
                 'max_step_km': max_jump,
                 'mean_step_km': mean_jump,
+                'attempts': attempts,
             })
 
             if first_from_prev > args.far_threshold:
